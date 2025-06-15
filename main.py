@@ -1,113 +1,106 @@
-import telebot
+import telebot, json, random
 from telebot import types
-import json
-import os
 
-TOKEN = '7217912729:AAFuXcRQNl0p-uCQZb64cxakJD15_b414q8'
-bot = telebot.TeleBot(TOKEN)
+bot = telebot.TeleBot('7217912729:AAFuXcRQNl0p-uCQZb64cxakJD15_b414q8')
+ADMIN_ID = 6994772164
+data = {}
 
-user_data = {}
-USERS_FILE = "users.json"
-ADMIN_ID = 6994772164  # آی‌دی خودت رو بزار
+try:
+    with open('users.json', 'r') as f:
+        data = json.load(f)
+except:
+    pass
 
-cities_afghanistan = [
-    "کابل", "هرات", "مزار شریف", "قندهار", "جلال‌آباد",
-    "بامیان", "غزنی", "بدخشان", "نیمروز", "فراه",
-    "سمنگان", "بلخ", "بادغیس", "پکتیا", "لوگر"
-]
+def save(): json.dump(data, open('users.json', 'w'))
 
-interests_list = ["🎮 بازی", "🎵 موسیقی", "🎬 فیلم", "📖 مطالعه", "💻 تکنولوژی"]
+cities = ['کابل', 'هرات', 'قندهار', 'مزار شریف']
+ai_users = set()
 
-# Load users
-if os.path.exists(USERS_FILE):
-    with open(USERS_FILE, "r", encoding="utf-8") as f:
-        all_users = json.load(f)
-else:
-    all_users = {}
+@bot.message_handler(commands=['start'])
+def start(m):
+    uid = str(m.from_user.id)
+    if uid not in data:
+        data[uid] = {'name': m.from_user.first_name, 'score': 0, 'level': 'معمولی', 'city': None}
+        save()
+    kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    kb.row('امتیاز روزانه', 'خرید اشتراک')
+    kb.row('جرأت یا حقیقت', 'AI-CHAT')
+    if m.from_user.id == ADMIN_ID: kb.add('مدیریت')
+    bot.send_message(m.chat.id, 'خوش اومدی! 🌟', reply_markup=kb)
 
-@bot.message_handler(commands=["start"])
-def send_welcome(message):
-    keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    keyboard.row("📝 ثبت اطلاعات من", "📊 اطلاعات من")
-    if message.chat.id == ADMIN_ID:
-        keyboard.row("📋 اطلاعات کاربران")
-    bot.send_message(message.chat.id, "سلام! یکی از گزینه‌ها رو انتخاب کن:", reply_markup=keyboard)
+@bot.message_handler(func=lambda m: m.text == 'امتیاز روزانه')
+def daily(m):
+    uid = str(m.from_user.id)
+    data[uid]['score'] += 1
+    save()
+    bot.reply_to(m, 'یک امتیاز گرفتی! 🪙')
 
-@bot.message_handler(func=lambda m: m.text == "📝 ثبت اطلاعات من")
-def ask_name(message):
-    user_data[message.chat.id] = {}
-    bot.send_message(message.chat.id, "نامت رو بنویس:")
-    bot.register_next_step_handler(message, ask_age)
+@bot.message_handler(func=lambda m: m.text == 'خرید اشتراک')
+def buy(m):
+    kb = types.InlineKeyboardMarkup()
+    for level, price in [('معمولی', 1), ('حرفه‌ای', 3), ('VIP', 5)]:
+        kb.add(types.InlineKeyboardButton(f'{level} - {price}🪙', callback_data=f'buy_{level}'))
+    bot.send_message(m.chat.id, 'انتخاب کن:', reply_markup=kb)
 
-def ask_age(message):
-    user_data[message.chat.id]["name"] = message.text
-    bot.send_message(message.chat.id, "چند سالته؟")
-    bot.register_next_step_handler(message, ask_gender)
-
-def ask_gender(message):
-    user_data[message.chat.id]["age"] = message.text
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-    markup.add("پسر", "دختر")
-    bot.send_message(message.chat.id, "جنسیتت رو انتخاب کن:", reply_markup=markup)
-    bot.register_next_step_handler(message, ask_city)
-
-def ask_city(message):
-    user_data[message.chat.id]["gender"] = message.text
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-    for city in cities_afghanistan:
-        markup.add(city)
-    bot.send_message(message.chat.id, "شهر خودت رو انتخاب کن:", reply_markup=markup)
-    bot.register_next_step_handler(message, ask_interests)
-
-def ask_interests(message):
-    user_data[message.chat.id]["city"] = message.text
-    markup = types.InlineKeyboardMarkup()
-    for interest in interests_list:
-        markup.add(types.InlineKeyboardButton(text=interest, callback_data=f"int_{interest}"))
-    markup.add(types.InlineKeyboardButton(text="✅ ثبت نهایی", callback_data="done"))
-    user_data[message.chat.id]["interests"] = []
-    bot.send_message(message.chat.id, "علاقه‌مندی‌هاتو انتخاب کن:", reply_markup=markup)
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith("int_"))
-def select_interest(call):
-    interest = call.data[4:]
-    uid = call.from_user.id
-    if interest not in user_data[uid]["interests"]:
-        user_data[uid]["interests"].append(interest)
-        bot.answer_callback_query(call.id, text=f"{interest} اضافه شد.")
+@bot.callback_query_handler(func=lambda c: c.data.startswith('buy_'))
+def buy_cb(c):
+    uid = str(c.from_user.id)
+    level = c.data[4:]
+    cost = {'معمولی': 1, 'حرفه‌ای': 3, 'VIP': 5}[level]
+    if data[uid]['score'] >= cost:
+        data[uid]['score'] -= cost
+        data[uid]['level'] = level
+        save()
+        bot.answer_callback_query(c.id, f'{level} فعال شد!')
     else:
-        bot.answer_callback_query(call.id, text=f"{interest} قبلاً انتخاب شده.")
+        bot.answer_callback_query(c.id, 'امتیاز کافی نیست.')
 
-@bot.callback_query_handler(func=lambda call: call.data == "done")
-def finish_registration(call):
-    uid = call.from_user.id
-    user = user_data.get(uid, {})
-    user["level"] = "معمولی"
-    user["id"] = uid
-    all_users[str(uid)] = user
-    with open(USERS_FILE, "w", encoding="utf-8") as f:
-        json.dump(all_users, f, ensure_ascii=False, indent=2)
-    bot.send_message(uid, "ثبت‌نام با موفقیت انجام شد ✅")
+@bot.message_handler(func=lambda m: m.text == 'مدیریت' and m.from_user.id == ADMIN_ID)
+def admin(m):
+    text = ''
+    for uid, info in data.items():
+        text += f"👤 [{info['name']}](tg://user?id={uid}) | امتیاز: {info['score']} | سطح: {info['level']} | شهر: {info['city']}\n"
+    bot.send_message(m.chat.id, text or 'کاربری نیست', parse_mode='Markdown')
 
-@bot.message_handler(func=lambda m: m.text == "📊 اطلاعات من")
-def show_user_info(message):
-    uid = str(message.chat.id)
-    if uid in all_users:
-        u = all_users[uid]
-        info = f"👤 نام: {u['name']}\n🎂 سن: {u['age']}\n🚻 جنسیت: {u['gender']}\n🏙 شهر: {u['city']}\n🎯 علاقه‌مندی‌ها: {', '.join(u['interests'])}\n⭐ سطح: {u['level']}"
-    else:
-        info = "شما هنوز ثبت‌نام نکردید."
-    bot.send_message(message.chat.id, info)
+@bot.message_handler(func=lambda m: m.text == 'جرأت یا حقیقت')
+def daretruth(m):
+    kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    kb.add('تنظیم شهر', 'پیدا کردن یک نفر')
+    bot.send_message(m.chat.id, 'یک گزینه رو بزن:', reply_markup=kb)
 
-@bot.message_handler(func=lambda m: m.text == "📋 اطلاعات کاربران" and m.chat.id == ADMIN_ID)
-def show_all_users(message):
-    text = ""
-    for uid, u in all_users.items():
-        text += f"👤 {u['name']} | ID: {uid}\n"
-        text += f"🎂 سن: {u['age']} | 🚻 جنسیت: {u['gender']}\n🏙 شهر: {u['city']} | ⭐ سطح: {u['level']}\n🎯 علاقه‌مندی‌ها: {', '.join(u['interests'])}\n\n"
-    if not text:
-        text = "هیچ کاربری ثبت‌نام نکرده."
-    bot.send_message(message.chat.id, text)
+@bot.message_handler(func=lambda m: m.text == 'تنظیم شهر')
+def set_city(m):
+    kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    for city in cities: kb.add(city)
+    bot.send_message(m.chat.id, 'شهر خود را انتخاب کن:', reply_markup=kb)
 
-print("ربات فعال شد...")
+@bot.message_handler(func=lambda m: m.text in cities)
+def save_city(m):
+    data[str(m.from_user.id)]['city'] = m.text
+    save()
+    bot.reply_to(m, f'شهر تنظیم شد: {m.text}')
+
+@bot.message_handler(func=lambda m: m.text == 'پیدا کردن یک نفر')
+def find_user(m):
+    me = str(m.from_user.id)
+    my_city = data[me].get('city')
+    if not my_city: return bot.reply_to(m, 'اول شهر را تنظیم کن.')
+    for uid, info in data.items():
+        if uid != me and info.get('city') == my_city:
+            return bot.send_message(m.chat.id, f"👤 [{info['name']}](tg://user?id={uid})", parse_mode='Markdown')
+    bot.reply_to(m, 'کسی از شهر تو پیدا نشد.')
+
+@bot.message_handler(func=lambda m: m.text == 'AI-CHAT')
+def ai_start(m):
+    ai_users.add(m.from_user.id)
+    bot.send_message(m.chat.id, 'سلام! با من حرف بزن (برای خروج بنویس /cancel)')
+
+@bot.message_handler(func=lambda m: m.from_user.id in ai_users)
+def ai_chat(m):
+    if m.text == '/cancel':
+        ai_users.remove(m.from_user.id)
+        return bot.send_message(m.chat.id, 'خارج شدی از AI-CHAT')
+    bot.reply_to(m, random.choice(['اوه جالبه!', 'ادامه بده...', 'واقعا؟', 'نمی‌دونم چی بگم 😅']))
+
+print('✅ ربات فعاله...')
 bot.infinity_polling()
