@@ -1,28 +1,25 @@
 import telebot
-from flask import Flask, request
+from telebot.types import ReplyKeyboardMarkup, KeyboardButton
 
 TOKEN = '7217912729:AAFuXcRQNl0p-uCQZb64cxakJD15_b414q8'
 bot = telebot.TeleBot(TOKEN)
-app = Flask(__name__)
+
+# ساخت کیبورد ساده با دو دکمه
+keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
+keyboard.add(KeyboardButton('جرأت یا حقیقت'))
+keyboard.add(KeyboardButton('AI-CHAT'))
 
 @bot.message_handler(commands=['start'])
-def start_handler(message):
-    bot.reply_to(message, "سلام، ربات با webhook فعال است!")
+def send_welcome(message):
+    bot.send_message(message.chat.id, "سلام! من ربات ساده تو هستم. یک گزینه انتخاب کن:", reply_markup=keyboard)
 
-@app.route('/' + TOKEN, methods=['POST'])
-def webhook():
-    json_str = request.get_data().decode('utf-8')
-    update = telebot.types.Update.de_json(json_str)
-    bot.process_new_updates([update])
-    return '', 200
+@bot.message_handler(func=lambda message: True)
+def handle_message(message):
+    if message.text == 'جرأت یا حقیقت':
+        bot.send_message(message.chat.id, "بازی جرأت یا حقیقت شروع شد! (هنوز در حال توسعه)")
+    elif message.text == 'AI-CHAT':
+        bot.send_message(message.chat.id, "اینجا میتونی با یه هوش مصنوعی ساده چت کنی. (در حال توسعه)")
+    else:
+        bot.send_message(message.chat.id, "متوجه نشدم، لطفاً یکی از دکمه‌ها را بزن.")
 
-@app.route('/')
-def index():
-    return "ربات فعال است", 200
-
-if __name__ == '__main__':
-    import os
-    port = int(os.environ.get('PORT', 5000))
-    bot.remove_webhook()
-    bot.set_webhook(url=f'https://MOHAMMAD-BOT.onrender.com/{TOKEN}')
-    app.run(host='0.0.0.0', port=port)
+bot.polling()
