@@ -1,7 +1,7 @@
 import telebot
 from telebot.types import ReplyKeyboardMarkup, KeyboardButton
 
-TOKEN = '7217912729:AAFuXcRQNl0p-uCQZb64cxakJD15_b414q8'
+TOKEN = '7217912729:AAGwbJSodBzOzhOf0Yh6VwNrRs2XACld1gA'
 bot = telebot.TeleBot(TOKEN)
 
 # داده ها را در حافظه موقت ذخیره می‌کنیم (برای ذخیره دائمی باید فایل یا دیتابیس استفاده شود)
