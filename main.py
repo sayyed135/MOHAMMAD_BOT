@@ -3,7 +3,7 @@ from telebot.types import ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemo
 import json
 import os
 
-TOKEN = '7217912729:AAFuXcRQNl0p-uCQZb64cxakJD15_b414q8'
+TOKEN = '7217912729:AAFiVHGx6g5mppiRtLdSO2mGtxyWXr8kRw0'
 bot = telebot.TeleBot(TOKEN)
 
 DATA_FILE = 'users.json'
