@@ -1,50 +1,56 @@
 import telebot
+import random
 
-TOKEN = '7217912729:AAHXuGAtqSfYkXQeVg4fY1mZ_aBEKqknqsA'
-ADMIN_ID = 6994772164
-bot = telebot.TeleBot(TOKEN)
+bot = telebot.TeleBot("7217912729:AAG0fXedfzX59DuvMHmHky2RS3JiMxlB7II")
+admin_id = 6994772164
+users_points = {}
+user_current_question = {}
+user_asked_questions = {}
 
-users = set()
+questions = [
+    {"id": 1, "q": "پایتخت افغانستان چیست؟", "a": ["کابل", "کابل افغانستان"]},
+    {"id": 2, "q": "رنگ پرچم افغانستان چیست؟", "a": ["سیاه قرمز سبز", "سبز قرمز سیاه", "پرچم سه رنگ"]},
+    {"id": 3, "q": "چه دینی در افغانستان بیشترین پیرو دارد؟", "a": ["اسلام", "مسلمان", "دین اسلام"]},
+]
 
 @bot.message_handler(commands=['start'])
-def start(message):
-    users.add(message.from_user.id)
-    bot.send_message(message.chat.id, "سلام! به ربات خوش آمدی.\nدستورات:\n📢 /sendall پیام\n👥 /users\n🎮 /daretotruth آیدی")
+def start(msg):
+    markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.row("🎯 جواب دادن")
+    bot.send_message(msg.chat.id, "سلام! یکی از گزینه‌ها را انتخاب کن:", reply_markup=markup)
 
-@bot.message_handler(commands=['users'])
-def show_users(message):
-    if message.from_user.id == ADMIN_ID:
-        user_list = '\n'.join(str(u) for u in users)
-        bot.send_message(message.chat.id, f"لیست کاربران ({len(users)}):\n{user_list}")
-    else:
-        bot.send_message(message.chat.id, "فقط مدیر به این بخش دسترسی دارد.")
+@bot.message_handler(func=lambda m: m.text == "🎯 جواب دادن")
+def send_question(msg):
+    chat_id = msg.chat.id
+    if chat_id not in user_asked_questions:
+        user_asked_questions[chat_id] = set()
 
-@bot.message_handler(commands=['sendall'])
-def send_all(message):
-    if message.from_user.id != ADMIN_ID:
-        return bot.send_message(message.chat.id, "فقط مدیر می‌تواند پیام همگانی بفرستد.")
-    text = message.text.replace('/sendall', '').strip()
-    if not text:
-        return bot.send_message(message.chat.id, "متن پیام را بعد از /sendall بنویس.")
-    count = 0
-    for uid in users:
-        try:
-            bot.send_message(uid, f"📢 پیام مدیریت:\n{text}")
-            count += 1
-        except:
-            continue
-    bot.send_message(message.chat.id, f"پیام برای {count} نفر ارسال شد.")
+    available = [q for q in questions if q['id'] not in user_asked_questions[chat_id]]
+    
+    if not available:
+        bot.send_message(chat_id, "✅ شما همه سوالات را پاسخ داده‌اید.")
+        return
 
-@bot.message_handler(commands=['daretotruth'])
-def dare_truth(message):
-    parts = message.text.split()
-    if len(parts) != 2:
-        return bot.send_message(message.chat.id, "مثال درست:\n/daretotruth 123456789")
-    try:
-        target_id = int(parts[1])
-        bot.send_message(target_id, f"🎮 کاربری با آیدی {message.from_user.id} می‌خواهد با شما بازی کند.\nآیا قبول می‌کنید؟ (فعلاً پاسخ دستی دهید)")
-        bot.send_message(message.chat.id, f"درخواست ارسال شد به آیدی {target_id}.")
-    except:
-        bot.send_message(message.chat.id, "خطا در ارسال آیدی.")
+    q = random.choice(available)
+    user_current_question[chat_id] = q
+    user_asked_questions[chat_id].add(q['id'])
+
+    bot.send_message(chat_id, f"❓ سوال:\n{q['q']}\n\n✏️ جواب را بنویس:")
+
+@bot.message_handler(func=lambda m: True)
+def handle_answer(msg):
+    chat_id = msg.chat.id
+    if chat_id in user_current_question:
+        question = user_current_question[chat_id]
+        correct_answers = question['a']
+        user_answer = msg.text.lower()
+
+        if any(ans in user_answer for ans in correct_answers):
+            users_points[chat_id] = users_points.get(chat_id, 0) + 1
+            bot.send_message(chat_id, f"✅ آفرین! جواب درست بود.\nامتیاز شما: {users_points[chat_id]}")
+        else:
+            bot.send_message(chat_id, "❌ متاسفم، جواب درست نبود.")
+
+        del user_current_question[chat_id]
 
 bot.infinity_polling()
