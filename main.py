@@ -1,56 +1,62 @@
 import telebot
-import random
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-bot = telebot.TeleBot("7217912729:AAG0fXedfzX59DuvMHmHky2RS3JiMxlB7II")
-admin_id = 6994772164
-users_points = {}
-user_current_question = {}
-user_asked_questions = {}
+TOKEN = "7217912729:AAG0fXedfzX59DuvMHmHky2RS3JiMxlB7II"
+ADMIN_ID = 6994772164  # آیدی عددی مدیر را اینجا بگذار
 
-questions = [
-    {"id": 1, "q": "پایتخت افغانستان چیست؟", "a": ["کابل", "کابل افغانستان"]},
-    {"id": 2, "q": "رنگ پرچم افغانستان چیست؟", "a": ["سیاه قرمز سبز", "سبز قرمز سیاه", "پرچم سه رنگ"]},
-    {"id": 3, "q": "چه دینی در افغانستان بیشترین پیرو دارد؟", "a": ["اسلام", "مسلمان", "دین اسلام"]},
-]
+bot = telebot.TeleBot(TOKEN)
 
 @bot.message_handler(commands=['start'])
-def start(msg):
-    markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.row("🎯 جواب دادن")
-    bot.send_message(msg.chat.id, "سلام! یکی از گزینه‌ها را انتخاب کن:", reply_markup=markup)
+def send_welcome(message):
+    markup = InlineKeyboardMarkup()
+    if message.from_user.id == ADMIN_ID:
+        markup.add(InlineKeyboardButton("🔧 مدیریت", callback_data="admin_menu"))
+    markup.add(
+        InlineKeyboardButton("🛒 خرید اشتراک", callback_data="buy_sub"),
+        InlineKeyboardButton("ℹ️ اطلاعات من", callback_data="my_info")
+    )
+    bot.send_message(message.chat.id, "Welcome! Choose an option:", reply_markup=markup)
 
-@bot.message_handler(func=lambda m: m.text == "🎯 جواب دادن")
-def send_question(msg):
-    chat_id = msg.chat.id
-    if chat_id not in user_asked_questions:
-        user_asked_questions[chat_id] = set()
+@bot.callback_query_handler(func=lambda call: True)
+def callback_query(call):
+    if call.data == "admin_menu":
+        if call.from_user.id != ADMIN_ID:
+            bot.answer_callback_query(call.id, "این بخش فقط برای مدیر است.")
+            return
+        admin_markup = InlineKeyboardMarkup()
+        admin_markup.add(
+            InlineKeyboardButton("👤 کاربران", callback_data="users"),
+            InlineKeyboardButton("⚙️ تنظیمات", callback_data="settings"),
+            InlineKeyboardButton("💎 اشتراک", callback_data="subscriptions")
+        )
+        bot.edit_message_text("مدیریت:", call.message.chat.id, call.message.message_id, reply_markup=admin_markup)
 
-    available = [q for q in questions if q['id'] not in user_asked_questions[chat_id]]
-    
-    if not available:
-        bot.send_message(chat_id, "✅ شما همه سوالات را پاسخ داده‌اید.")
-        return
+    elif call.data == "buy_sub":
+        bot.answer_callback_query(call.id)
+        bot.send_message(call.message.chat.id, "💳 برای خرید اشتراک با مدیر در ارتباط باشید.")
 
-    q = random.choice(available)
-    user_current_question[chat_id] = q
-    user_asked_questions[chat_id].add(q['id'])
+    elif call.data == "my_info":
+        user = call.from_user
+        info = f"👤 Name: {user.first_name}\n"
+        if user.last_name:
+            info += f"🧾 Last Name: {user.last_name}\n"
+        if user.username:
+            info += f"📛 Username: @{user.username}\n"
+        info += f"🆔 ID: {user.id}"
+        bot.send_message(call.message.chat.id, info)
 
-    bot.send_message(chat_id, f"❓ سوال:\n{q['q']}\n\n✏️ جواب را بنویس:")
+    elif call.data == "users":
+        bot.answer_callback_query(call.id)
+        bot.send_message(call.message.chat.id, "📋 لیست کاربران به‌زودی اضافه می‌شود.")
 
-@bot.message_handler(func=lambda m: True)
-def handle_answer(msg):
-    chat_id = msg.chat.id
-    if chat_id in user_current_question:
-        question = user_current_question[chat_id]
-        correct_answers = question['a']
-        user_answer = msg.text.lower()
+    elif call.data == "settings":
+        bot.answer_callback_query(call.id)
+        bot.send_message(call.message.chat.id, "⚙️ تنظیمات در حال توسعه است.")
 
-        if any(ans in user_answer for ans in correct_answers):
-            users_points[chat_id] = users_points.get(chat_id, 0) + 1
-            bot.send_message(chat_id, f"✅ آفرین! جواب درست بود.\nامتیاز شما: {users_points[chat_id]}")
-        else:
-            bot.send_message(chat_id, "❌ متاسفم، جواب درست نبود.")
+    elif call.data == "subscriptions":
+        bot.answer_callback_query(call.id)
+        bot.send_message(call.message.chat.id, "💎 بخش اشتراک هنوز کامل نشده.")
 
-        del user_current_question[chat_id]
-
-bot.infinity_polling()
+if __name__ == "__main__":
+    print("Bot running...")
+    bot.infinity_polling()
