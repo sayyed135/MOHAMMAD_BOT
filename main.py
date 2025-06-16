@@ -32,19 +32,19 @@ def receive_update():
 # شروع
 @bot.message_handler(commands=['start'])
 def handle_start(message):
-    bot.reply_to(message, "سلام! ✅ ربات با webhook فعاله.")
+    if message.from_user.id == ADMIN_ID:
+        markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
+        markup.add("🛠 مدیریت")
+        bot.send_message(message.chat.id, "سلام مدیر عزیز! ✅ ربات با webhook فعاله.", reply_markup=markup)
+    else:
+        bot.send_message(message.chat.id, "سلام! ✅ ربات با webhook فعاله.")
 
-# ✅ منوی مدیریت (فقط برای مدیر)
-@bot.message_handler(commands=['admin'])
-def handle_admin(message):
-    if message.from_user.id != ADMIN_ID:
-        bot.reply_to(message, "⛔️ فقط مدیر به این بخش دسترسی دارد.")
-        return
-
+# ✅ گزینه "مدیریت"
+@bot.message_handler(func=lambda m: m.text == "🛠 مدیریت" and m.from_user.id == ADMIN_ID)
+def handle_admin_button(message):
     markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
     markup.add("📊 تنظیم امتیاز برای بازی‌ها", "📬 ارسال پیام همگانی")
     markup.add("📌 بررسی کاربران", "❌ بستن منو")
-
     bot.send_message(message.chat.id, "🎛 منوی مدیریت:", reply_markup=markup)
 
 # پاسخ به دکمه‌های منوی مدیریت
@@ -52,7 +52,7 @@ def handle_admin(message):
 def admin_buttons(message):
     if message.text == "📊 تنظیم امتیاز برای بازی‌ها":
         bot.reply_to(message, "🔧 لطفاً امتیاز بازی مورد نظر را وارد کنید...")
-    elif message.text == "📬 ارسال پیام همگانی":
+    elif message.text == "📬 پیام همگانی":
         bot.reply_to(message, "📝 پیام خود را بفرست تا به همه ارسال شود.")
     elif message.text == "📌 بررسی کاربران":
         bot.reply_to(message, "👥 در حال بررسی کاربران...")
@@ -63,7 +63,7 @@ def admin_buttons(message):
 # پیام‌های نامشخص
 @bot.message_handler(func=lambda m: True)
 def handle_all(message):
-    bot.reply_to(message, "دستور نامشخصه. لطفاً /start یا /admin رو بزن.")
+    bot.reply_to(message, "دستور نامشخصه. لطفاً /start یا گزینه‌های موجود رو انتخاب کن.")
 
 # اجرای سرور Flask و فعال‌سازی webhook
 if __name__ == '__main__':
