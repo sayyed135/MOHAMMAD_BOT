@@ -1,176 +1,112 @@
 import telebot
 from flask import Flask, request
-import logging
-import os
+import os, logging
 from random import choice
 
 TOKEN = '7217912729:AAHEug-znb_CGJTXlITt3Zrjp2dJan0a9Gs'
 WEBHOOK_URL = 'https://mohammad-bot-2.onrender.com/'
+ADMIN_ID = 6994772164
 
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
-ADMIN_ID = 6994772164
-
 logging.basicConfig(level=logging.INFO)
 
-# متغیرهای مدیریت
-waiting_for_broadcast_message = False
-waiting_for_score_game = None
-active_games = {}  # user_id: {"accepted": bool, "turn": "truth"/"dare"}
+# وضعیت بازی
+active_games = {}
+hard_truths = ["📖 بزرگترین دروغی که گفتی چی بود؟", "📖 تا حالا به کسی خیانت کردی؟"]
+hard_dares = ["🎭 صدای عجیب بفرست", "🎭 به یکی بگو عاشقش بودی!"]
 
-# سوالات سخت حقیقت و جرأت
-hard_truths = [
-    "📖 سخت‌ترین رازی که تا حالا مخفی کردی چیه؟",
-    "📖 آخرین باری که از کسی سوءاستفاده کردی کی بود؟",
-    "📖 تا حالا به کسی خیانت کردی؟",
-    "📖 بزرگترین دروغی که گفتی چی بود؟"
-]
-
-hard_dares = [
-    "🎭 از مادرت بپرس: «مامان، تا حالا عاشق شدی؟»",
-    "🎭 یه صدای عجیب بفرست برای مدیر!",
-    "🎭 به یه دوستت بگو: «من عاشقت بودم!»",
-    "🎭 اسم کسی رو که ازش متنفری بفرست!"
-]
-
+# Webhook route
 @app.route('/', methods=['POST'])
-def receive_update():
+def webhook():
     if request.headers.get('content-type') == 'application/json':
-        try:
-            json_string = request.get_data().decode('utf-8')
-            update = telebot.types.Update.de_json(json_string)
-            bot.process_new_updates([update])
-            return '', 200
-        except Exception as e:
-            logging.error(f'❌ Error: {e}')
-            return 'Internal Error', 500
-    return 'Invalid content-type', 403
+        update = telebot.types.Update.de_json(request.data.decode("utf-8"))
+        bot.process_new_updates([update])
+        return '', 200
+    return 'Invalid content type', 403
 
-# شروع
+# /start
 @bot.message_handler(commands=['start'])
-def handle_start(message):
-    if message.from_user.id == ADMIN_ID:
-        markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
-        markup.add("🛠 مدیریت")
-        bot.send_message(message.chat.id, "سلام مدیر عزیز! ✅ ربات با webhook فعاله.", reply_markup=markup)
+def start(msg):
+    if msg.from_user.id == ADMIN_ID:
+        mk = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
+        mk.add("🛠 مدیریت")
+        bot.send_message(msg.chat.id, "سلام مدیر عزیز 👑", reply_markup=mk)
     else:
-        markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
-        markup.add("🎲 GAMES")
-        bot.send_message(message.chat.id, "سلام دوست عزیز😁", reply_markup=markup)
+        mk = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
+        mk.add("🎮 بازی‌ها", "📊 امتیاز من", "📋 پروفایل")
+        bot.send_message(msg.chat.id, "سلام! یکی از گزینه‌های زیر رو انتخاب کن 👇", reply_markup=mk)
 
 # مدیریت
 @bot.message_handler(func=lambda m: m.text == "🛠 مدیریت" and m.from_user.id == ADMIN_ID)
-def handle_admin_button(message):
-    markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-    markup.add("📊 تنظیم امتیاز برای بازی‌ها", "📬 ارسال پیام همگانی")
-    markup.add("📌 بررسی کاربران", "❌ بستن منو")
-    bot.send_message(message.chat.id, "🎛 منوی مدیریت:", reply_markup=markup)
+def admin_panel(msg):
+    bot.send_message(msg.chat.id, "🎛 پنل مدیریت فعاله.")
 
-# دستورات مدیر
-@bot.message_handler(func=lambda message: message.from_user.id == ADMIN_ID)
-def admin_buttons(message):
-    global waiting_for_broadcast_message, waiting_for_score_game
-    if waiting_for_broadcast_message:
-        users = get_all_users()
-        for user_id in users:
-            try:
-                bot.send_message(user_id, f"پیام همگانی از مدیر:\n\n{message.text}")
-            except: continue
-        bot.reply_to(message, f"📨 پیام فرستاده شد.")
-        waiting_for_broadcast_message = False
-        return
+# دکمه بازی‌ها
+@bot.message_handler(func=lambda m: m.text == "🎮 بازی‌ها")
+def games_menu(msg):
+    mk = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
+    mk.add("🎭 جرأت و حقیقت با مدیر", "❌ برگشت")
+    bot.send_message(msg.chat.id, "🎲 یکی از بازی‌ها رو انتخاب کن:", reply_markup=mk)
 
-    if waiting_for_score_game:
-        try:
-            score = int(message.text)
-            game_scores[waiting_for_score_game] = score
-            bot.reply_to(message, f"✅ امتیاز بازی {waiting_for_score_game} ثبت شد.")
-        except:
-            bot.reply_to(message, "❌ لطفاً فقط عدد بنویس.")
-        waiting_for_score_game = None
-        return
-
-    if message.text == "📊 تنظیم امتیاز برای بازی‌ها":
-        markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-        markup.add("جرأت و حقیقت", "درصد", "❌ بازگشت")
-        bot.send_message(message.chat.id, "بازی مورد نظر رو انتخاب کن:", reply_markup=markup)
-
-    elif message.text in game_scores.keys():
-        waiting_for_score_game = message.text
-        bot.send_message(message.chat.id, f"امتیاز جدید برای بازی «{message.text}» رو وارد کن:")
-
-    elif message.text == "📬 ارسال پیام همگانی":
-        waiting_for_broadcast_message = True
-        bot.send_message(message.chat.id, "📝 پیام همگانی خود را بنویس:")
-
-    elif message.text == "📌 بررسی کاربران":
-        bot.send_message(message.chat.id, "👥 بررسی کاربران...")
-
-    elif message.text == "❌ بستن منو":
-        markup = telebot.types.ReplyKeyboardRemove()
-        bot.send_message(message.chat.id, "❎ منوی مدیریت بسته شد.", reply_markup=markup)
-
-# دکمه GAMES
-@bot.message_handler(func=lambda m: m.text == "🎲 GAMES")
-def show_games(message):
-    markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-    markup.add("🎭 جرأت و حقیقت با مدیر", "❌ بازگشت")
-    bot.send_message(message.chat.id, "🎮 یکی از بازی‌ها رو انتخاب کن:", reply_markup=markup)
-
-# درخواست بازی با مدیر
+# درخواست بازی
 @bot.message_handler(func=lambda m: m.text == "🎭 جرأت و حقیقت با مدیر")
-def request_game(message):
-    user_id = message.from_user.id
-    active_games[user_id] = {"accepted": False, "turn": "truth"}
-    bot.send_message(ADMIN_ID, f"👤 کاربر {message.from_user.first_name} درخواست بازی داده.", reply_markup=telebot.types.InlineKeyboardMarkup().add(
-        telebot.types.InlineKeyboardButton(f"قبول بازی با {message.from_user.first_name}", callback_data=f"accept_{user_id}")
-    ))
-    bot.send_message(user_id, "📨 درخواست شما به مدیر فرستاده شد. منتظر تایید باشید.")
+def dare_request(msg):
+    uid = msg.from_user.id
+    active_games[uid] = {"accepted": False, "turn": "truth"}
+    btn = telebot.types.InlineKeyboardButton("قبول بازی", callback_data=f"accept_{uid}")
+    ik = telebot.types.InlineKeyboardMarkup().add(btn)
+    bot.send_message(ADMIN_ID, f"🎮 {msg.from_user.first_name} درخواست بازی داده", reply_markup=ik)
+    bot.send_message(uid, "📩 درخواستت برای مدیر ارسال شد.")
 
-# تایید بازی توسط مدیر
-@bot.callback_query_handler(func=lambda call: call.data.startswith("accept_"))
-def accept_game(call):
-    user_id = int(call.data.split("_")[1])
-    active_games[user_id]["accepted"] = True
-    bot.send_message(user_id, "✅ مدیر بازی رو قبول کرد! شروع می‌کنیم.")
-    ask_turn(ADMIN_ID, user_id)
+# مدیر بازی رو قبول کنه
+@bot.callback_query_handler(func=lambda c: c.data.startswith("accept_"))
+def accept_game(c):
+    uid = int(c.data.split("_")[1])
+    active_games[uid]["accepted"] = True
+    bot.send_message(uid, "✅ مدیر بازی رو قبول کرد. شروع کنیم!")
+    next_turn(ADMIN_ID, uid)
 
-# پرسیدن سوال یا جرأت به نوبت
-def ask_turn(player_id, opponent_id):
-    game = active_games[opponent_id]
-    if game["turn"] == "truth":
-        q = choice(hard_truths)
-        bot.send_message(player_id, f"📖 سوال حقیقت: {q}")
-        game["turn"] = "dare"
-    else:
-        q = choice(hard_dares)
-        bot.send_message(player_id, f"🎭 ماموریت جرأت: {q}")
-        game["turn"] = "truth"
+def next_turn(player, opponent):
+    turn = active_games[opponent]["turn"]
+    q = choice(hard_truths if turn == "truth" else hard_dares)
+    bot.send_message(player, f"{'📖 حقیقت' if turn=='truth' else '🎭 جرأت'}: {q}")
+    active_games[opponent]["turn"] = "dare" if turn == "truth" else "truth"
 
 # ادامه بازی
 @bot.message_handler(func=lambda m: m.from_user.id in active_games and active_games[m.from_user.id]["accepted"])
-def continue_game(message):
-    user_id = message.from_user.id
-    target_id = ADMIN_ID if user_id != ADMIN_ID else [uid for uid in active_games if active_games[uid]["accepted"]][0]
-    if message.text == "❌ پایان":
-        bot.send_message(user_id, "❎ بازی پایان یافت.")
-        bot.send_message(target_id, "❎ بازی پایان یافت.")
-        del active_games[user_id if user_id != ADMIN_ID else target_id]
+def continue_game(m):
+    uid = m.from_user.id
+    other = ADMIN_ID if uid != ADMIN_ID else [u for u in active_games if active_games[u]["accepted"]][0]
+    if m.text == "❌ پایان":
+        bot.send_message(uid, "❎ بازی تموم شد.")
+        bot.send_message(other, "❎ بازی تموم شد.")
+        del active_games[uid if uid != ADMIN_ID else other]
     else:
-        ask_turn(target_id, target_id if user_id == ADMIN_ID else user_id)
+        next_turn(other, other if uid == ADMIN_ID else uid)
 
-# کاربران تست
-def get_all_users():
-    return [ADMIN_ID]
+# سایر دکمه‌ها
+@bot.message_handler(func=lambda m: m.text == "📊 امتیاز من")
+def score(msg):
+    bot.reply_to(msg, "💠 امتیاز شما: ۰ (آزمایشی)")
 
-# دستورات ناشناخته
+@bot.message_handler(func=lambda m: m.text == "📋 پروفایل")
+def profile(msg):
+    user = msg.from_user
+    bot.reply_to(msg, f"🧑‍💻 نام: {user.first_name}\n🆔 آیدی عددی: {user.id}")
+
+@bot.message_handler(func=lambda m: m.text == "❌ برگشت")
+def back(msg):
+    start(msg)
+
+# پاسخ به سایر پیام‌ها
 @bot.message_handler(func=lambda m: True)
-def handle_all(message):
-    bot.reply_to(message, "دستور نامشخصه. لطفاً /start یا گزینه‌های منو رو بزن.")
+def fallback(msg):
+    bot.send_message(msg.chat.id, "❗️دستور نامعتبره. لطفاً از دکمه‌ها استفاده کن.")
 
-# اجرا
+# اجرای برنامه
 if __name__ == '__main__':
     bot.remove_webhook()
     bot.set_webhook(url=WEBHOOK_URL)
     port = int(os.environ.get("PORT", 10000))
-    app.run(host='0.0.0.0', port=port)
+    app.run(host="0.0.0.0", port=port)
