@@ -1,33 +1,57 @@
 import telebot
 from flask import Flask, request
+import logging
+import os
 
+# ============== تنظیمات ==============
 TOKEN = '7217912729:AAGsCp-YNxnlMUB8M352p2EcVGB2K0at2Xg'
-bot = telebot.TeleBot(TOKEN)
-WEBHOOK_URL = 'https://mohammad-bot-2.onrender.com/'
+WEBHOOK_URL = 'https://mohammad-bot-2.onrender.com/'  # آدرس رباتت در Render
 
+bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
-# تنظیم Webhook
+# ============== لاگ‌ها برای دیباگ ==============
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# ============== ست کردن وب هوک ==============
 @app.before_first_request
 def set_webhook():
     bot.remove_webhook()
-    bot.set_webhook(url=WEBHOOK_URL)
+    success = bot.set_webhook(url=WEBHOOK_URL)
+    if success:
+        logger.info("✅ Webhook set successfully.")
+    else:
+        logger.error("❌ Failed to set webhook!")
 
-# روت دریافت پیام‌های تلگرام
+# ============== دریافت پیام از تلگرام ==============
 @app.route('/', methods=['POST'])
-def webhook():
+def receive_update():
     if request.headers.get('content-type') == 'application/json':
-        json_string = request.get_data().decode('utf-8')
-        update = telebot.types.Update.de_json(json_string)
-        bot.process_new_updates([update])
-        return '', 200
+        try:
+            json_string = request.get_data().decode('utf-8')
+            update = telebot.types.Update.de_json(json_string)
+            bot.process_new_updates([update])
+            return '', 200
+        except Exception as e:
+            logger.exception("❌ Error processing update: %s", e)
+            return 'Internal Server Error', 500
     return 'Invalid content-type', 403
 
-# دستور تست ساده
+# ============== دستورات ربات ==============
 @bot.message_handler(commands=['start'])
-def send_welcome(message):
-    bot.reply_to(message, "سلام محمد! رباتت با Webhook فعال شد 😎")
+def handle_start(message):
+    bot.reply_to(message, "سلام محمد! 🌟\nمن فعالم و منتظر دستورات تو هستم.")
 
-# اجرای Flask سرور
+@bot.message_handler(commands=['help'])
+def handle_help(message):
+    bot.reply_to(message, "📌 دستورات من:\n/start - شروع\n/help - راهنما")
+
+@bot.message_handler(func=lambda m: True)
+def handle_all_messages(message):
+    bot.reply_to(message, "متوجه نشدم. لطفاً یکی از دستورات رو وارد کن یا /help رو بزن.")
+
+# ============== اجرای سرور Flask ==============
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=10000)
+    PORT = int(os.environ.get("PORT", 10000))
+    app.run(host='0.0.0.0', port=PORT)
