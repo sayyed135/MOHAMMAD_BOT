@@ -9,13 +9,21 @@ WEBHOOK_URL = 'https://mohammad-bot-2.onrender.com/'
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
-# آیدی مدیر (تو خودتی 😎)
 ADMIN_ID = 6994772164
 
-# تنظیم لاگ
 logging.basicConfig(level=logging.INFO)
 
-# دریافت پیام‌های وب‌هوک از تلگرام
+# دیکشنری برای ذخیره امتیازات بازی‌ها
+game_scores = {
+    "جرأت و حقیقت": 0,
+    "درصد": 0,
+    "بازی‌های دیگر": 0
+}
+
+# متغیرهای وضعیت
+waiting_for_broadcast_message = False
+waiting_for_score_game = None  # نام بازی‌ای که منتظر امتیاز آن هستیم
+
 @app.route('/', methods=['POST'])
 def receive_update():
     if request.headers.get('content-type') == 'application/json':
@@ -29,7 +37,6 @@ def receive_update():
             return 'Internal Error', 500
     return 'Invalid content-type', 403
 
-# شروع
 @bot.message_handler(commands=['start'])
 def handle_start(message):
     if message.from_user.id == ADMIN_ID:
@@ -37,9 +44,8 @@ def handle_start(message):
         markup.add("🛠 مدیریت")
         bot.send_message(message.chat.id, "سلام مدیر عزیز! ✅ ربات با webhook فعاله.", reply_markup=markup)
     else:
-        bot.send_message(message.chat.id, "سلام! ✅ ربات با webhook فعاله.")
+        bot.send_message(message.chat.id, "سلام دوست عزیز😁")
 
-# ✅ گزینه "مدیریت"
 @bot.message_handler(func=lambda m: m.text == "🛠 مدیریت" and m.from_user.id == ADMIN_ID)
 def handle_admin_button(message):
     markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
@@ -47,25 +53,72 @@ def handle_admin_button(message):
     markup.add("📌 بررسی کاربران", "❌ بستن منو")
     bot.send_message(message.chat.id, "🎛 منوی مدیریت:", reply_markup=markup)
 
-# پاسخ به دکمه‌های منوی مدیریت
 @bot.message_handler(func=lambda message: message.from_user.id == ADMIN_ID)
 def admin_buttons(message):
+    global waiting_for_broadcast_message, waiting_for_score_game
+
+    if waiting_for_broadcast_message:
+        # ارسال پیام همگانی
+        broadcast_text = message.text
+        users = get_all_users()  # تابع باید همه کاربران را بدهد
+        sent_count = 0
+        for user_id in users:
+            try:
+                bot.send_message(user_id, f"پیام همگانی از مدیر:\n\n{broadcast_text}")
+                sent_count += 1
+            except Exception as e:
+                logging.error(f"خطا در ارسال به {user_id}: {e}")
+
+        bot.reply_to(message, f"پیام به {sent_count} کاربر ارسال شد.")
+        waiting_for_broadcast_message = False
+        return
+
+    if waiting_for_score_game:
+        try:
+            score = int(message.text)
+            game_scores[waiting_for_score_game] = score
+            bot.reply_to(message, f"امتیاز بازی «{waiting_for_score_game}» با موفقیت به {score} تنظیم شد.")
+        except ValueError:
+            bot.reply_to(message, "❌ لطفاً فقط عدد وارد کنید.")
+            return
+        waiting_for_score_game = None
+        return
+
     if message.text == "📊 تنظیم امتیاز برای بازی‌ها":
-        bot.reply_to(message, "🔧 لطفاً امتیاز بازی مورد نظر را وارد کنید...")
-    elif message.text == "📬 پیام همگانی":
-        bot.reply_to(message, "📝 پیام خود را بفرست تا به همه ارسال شود.")
+        markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+        markup.add("جرأت و حقیقت", "درصد", "بازی‌های دیگر", "❌ بازگشت")
+        bot.send_message(message.chat.id, "لطفاً بازی مورد نظر را انتخاب کنید:", reply_markup=markup)
+
+    elif message.text in game_scores.keys():
+        waiting_for_score_game = message.text
+        bot.reply_to(message, f"لطفاً امتیاز جدید برای بازی «{message.text}» را وارد کنید:")
+
+    elif message.text == "❌ بازگشت":
+        handle_admin_button(message)
+
+    elif message.text == "📬 ارسال پیام همگانی":
+        waiting_for_broadcast_message = True
+        bot.reply_to(message, "📝 لطفاً پیام همگانی خود را ارسال کنید:")
+
     elif message.text == "📌 بررسی کاربران":
-        bot.reply_to(message, "👥 در حال بررسی کاربران...")
+        bot.reply_to(message, "👥 در حال بررسی کاربران... (باید تابع مناسب بنویسی)")
+
     elif message.text == "❌ بستن منو":
         markup = telebot.types.ReplyKeyboardRemove()
         bot.send_message(message.chat.id, "❎ منوی مدیریت بسته شد.", reply_markup=markup)
 
-# پیام‌های نامشخص
+    else:
+        bot.reply_to(message, "دستور نامشخصه. لطفاً گزینه‌های منو را انتخاب کن.")
+
+def get_all_users():
+    # اینجا باید همه آیدی کاربران را ذخیره و برگردونی
+    # الان فقط مدیر رو داریم برای تست
+    return [ADMIN_ID]
+
 @bot.message_handler(func=lambda m: True)
 def handle_all(message):
     bot.reply_to(message, "دستور نامشخصه. لطفاً /start یا گزینه‌های موجود رو انتخاب کن.")
 
-# اجرای سرور Flask و فعال‌سازی webhook
 if __name__ == '__main__':
     bot.remove_webhook()
     bot.set_webhook(url=WEBHOOK_URL)
