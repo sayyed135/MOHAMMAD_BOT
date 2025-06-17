@@ -3,52 +3,94 @@ from flask import Flask, request
 import os
 
 TOKEN = '7217912729:AAHEug-znb_CGJTXlITt3Zrjp2dJan0a9Gs'
-WEBHOOK_URL = 'https://mohammad-bot-2.onrender.com/'  # آدرس رندر تو
+WEBHOOK_URL = 'https://mohammad-bot-2.onrender.com/'
 
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
-users = {}  # user_id: {"username": "name"}
+# ساختار چت‌های فعال
+active_chats = {}  # user_id: partner_id
+pending_requests = {}  # user_id: target_username
+usernames = {}  # user_id: username
 
+# شروع
 @bot.message_handler(commands=['start'])
 def start(message):
-    users[message.chat.id] = {"username": message.from_user.username}
+    usernames[message.chat.id] = message.from_user.username
     markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.add("✉️ ارسال پیام ناشناس")
-    bot.send_message(message.chat.id, "سلام! خوش آمدی به ربات پیام ناشناس 😎", reply_markup=markup)
+    markup.add("✉️ شروع چت ناشناس")
+    bot.send_message(message.chat.id, "سلام! به ربات چت ناشناس خوش اومدی 🤫", reply_markup=markup)
 
-@bot.message_handler(func=lambda m: m.text == "✉️ ارسال پیام ناشناس")
-def ask_for_receiver(message):
-    msg = bot.send_message(message.chat.id, "آیدی کسی که می‌خوای براش پیام بفرستی رو بنویس (مثلاً: @ali123):")
-    bot.register_next_step_handler(msg, get_target_username)
+# مرحله درخواست چت
+@bot.message_handler(func=lambda m: m.text == "✉️ شروع چت ناشناس")
+def ask_target(message):
+    msg = bot.send_message(message.chat.id, "آیدی کسی که می‌خوای باهاش ناشناس چت کنی رو بنویس (بدون @):")
+    bot.register_next_step_handler(msg, check_user)
 
-def get_target_username(message):
-    target_username = message.text.strip().lstrip('@')
-    user_id = None
-    for uid, data in users.items():
-        if data.get("username") == target_username:
-            user_id = uid
+def check_user(message):
+    target_username = message.text.strip().lower()
+    sender_id = message.chat.id
+    receiver_id = None
+
+    for uid, uname in usernames.items():
+        if uname and uname.lower() == target_username:
+            receiver_id = uid
             break
 
-    if user_id:
-        msg = bot.send_message(message.chat.id, "خب، حالا متن پیامت رو بنویس:")
-        bot.register_next_step_handler(msg, send_anonymous_message, user_id)
+    if receiver_id:
+        pending_requests[receiver_id] = sender_id
+        bot.send_message(sender_id, "📨 درخواست چت ناشناس فرستاده شد. منتظر تایید باش.")
+        markup = telebot.types.InlineKeyboardMarkup()
+        markup.add(telebot.types.InlineKeyboardButton("قبول چت ناشناس ✅", callback_data=f"accept_{sender_id}"))
+        bot.send_message(receiver_id, f"📩 درخواست چت ناشناس از یک نفر داری. می‌خوای قبول کنی؟", reply_markup=markup)
     else:
-        bot.send_message(message.chat.id, "❌ کسی با این آیدی هنوز توی ربات ثبت‌نام نکرده!")
+        bot.send_message(sender_id, "❌ این آیدی هنوز در ربات ثبت‌نام نکرده یا اشتباه نوشتی.")
 
-def send_anonymous_message(message, user_id):
-    bot.send_message(user_id, f"📩 پیام ناشناس برات اومده:\n\n{message.text}")
-    bot.send_message(message.chat.id, "✅ پیام ناشناس ارسال شد!")
+# تایید چت ناشناس
+@bot.callback_query_handler(func=lambda call: call.data.startswith("accept_"))
+def accept_chat(call):
+    receiver_id = call.from_user.id
+    sender_id = int(call.data.split("_")[1])
+    if receiver_id in pending_requests and pending_requests[receiver_id] == sender_id:
+        active_chats[sender_id] = receiver_id
+        active_chats[receiver_id] = sender_id
+        del pending_requests[receiver_id]
 
+        bot.send_message(sender_id, "✅ چت ناشناس شروع شد. می‌تونی پیام بفرستی.")
+        bot.send_message(receiver_id, "✅ چت ناشناس شروع شد. می‌تونی پیام بفرستی.")
+    else:
+        bot.send_message(receiver_id, "❌ درخواستی معتبر پیدا نشد.")
+
+# پیام‌های داخل چت ناشناس
+@bot.message_handler(func=lambda m: m.chat.id in active_chats)
+def anonymous_chat(message):
+    sender = message.chat.id
+    receiver = active_chats[sender]
+
+    if message.text.strip().lower() == "پایان":
+        bot.send_message(sender, "❌ چت ناشناس پایان یافت.")
+        bot.send_message(receiver, "❌ طرف مقابل چت ناشناس رو پایان داد.")
+        del active_chats[sender]
+        del active_chats[receiver]
+        return
+
+    bot.send_message(receiver, f"📨 پیام ناشناس:\n{message.text}")
+
+# پیام‌های نامشخص
+@bot.message_handler(func=lambda m: True)
+def fallback(message):
+    bot.send_message(message.chat.id, "برای شروع چت ناشناس روی «✉️ شروع چت ناشناس» بزن.")
+
+# Webhook
 @app.route('/', methods=['POST'])
 def webhook():
     if request.headers.get('content-type') == 'application/json':
-        json_string = request.get_data().decode('utf-8')
-        update = telebot.types.Update.de_json(json_string)
+        update = telebot.types.Update.de_json(request.get_data().decode('utf-8'))
         bot.process_new_updates([update])
         return '', 200
     return '', 403
 
+# اجرا
 if __name__ == '__main__':
     bot.remove_webhook()
     bot.set_webhook(url=WEBHOOK_URL)
