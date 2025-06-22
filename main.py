@@ -1,189 +1,228 @@
 import telebot
 from flask import Flask, request
-import os
+import sqlite3
+import requests
+import json
 from datetime import datetime
-from random import choice
+from telebot.types import ReplyKeyboardMarkup, KeyboardButton
+import random
 
-TOKEN = '7217912729:AAHEug-znb_CGJTXlITt3Zrjp2dJan0a9Gs'
-WEBHOOK_URL = 'https://mohammad-bot-2.onrender.com/'
-ADMIN_ID = 6994772164
+API_TOKEN = '7217912729:AAG-7SZpd6HAh6j0al--kRYNXmpsIFAhmcQ'  # توکن ربات
+OPENAI_API_KEY = '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'  # کلید ChatGPT
 
-bot = telebot.TeleBot(TOKEN)
+WEBHOOK_URL = 'https://mohammad-bot-2.onrender.com/'  # وب‌هوک خودت
+
+bot = telebot.TeleBot(API_TOKEN)
 app = Flask(__name__)
 
-connected_users = {}  # user_id: partner_id
-pending_requests = set()
-truth_dare_sessions = {}  # user_id: {"partner": id, "turn": str, "last_question": str}
-blocked_users = set()
+# دیتابیس
+conn = sqlite3.connect('botdata.db', check_same_thread=False)
+cursor = conn.cursor()
 
-# سوالات
+# ایجاد جداول
+cursor.execute('''
+CREATE TABLE IF NOT EXISTS users (
+    user_id INTEGER PRIMARY KEY,
+    username TEXT,
+    first_name TEXT,
+    last_name TEXT,
+    last_daily_date TEXT,
+    coin INTEGER DEFAULT 0,
+    gold INTEGER DEFAULT 0,
+    diamond INTEGER DEFAULT 0,
+    subscription_level TEXT DEFAULT 'free'
+)
+''')
+
+cursor.execute('''
+CREATE TABLE IF NOT EXISTS chat_memory (
+    user_id INTEGER,
+    role TEXT,
+    content TEXT
+)
+''')
+
+conn.commit()
+
+# ذخیره و دریافت حافظه چت
+def save_to_memory(user_id, role, content):
+    cursor.execute('INSERT INTO chat_memory (user_id, role, content) VALUES (?, ?, ?)', (user_id, role, content))
+    cursor.execute('''
+        DELETE FROM chat_memory
+        WHERE user_id = ? AND rowid NOT IN (
+            SELECT rowid FROM chat_memory
+            WHERE user_id = ?
+            ORDER BY rowid DESC
+            LIMIT 10
+        )
+    ''', (user_id, user_id))
+    conn.commit()
+
+def get_chat_history(user_id):
+    cursor.execute('SELECT role, content FROM chat_memory WHERE user_id = ? ORDER BY rowid', (user_id,))
+    return [{"role": role, "content": content} for role, content in cursor.fetchall()]
+
+# ثبت کاربر
+def register_user(user):
+    cursor.execute('SELECT user_id FROM users WHERE user_id = ?', (user.id,))
+    if not cursor.fetchone():
+        cursor.execute('INSERT INTO users (user_id, username, first_name, last_name) VALUES (?, ?, ?, ?)',
+                       (user.id, user.username, user.first_name, user.last_name))
+        conn.commit()
+
+# امتیاز روزانه
+def add_daily_point(user_id):
+    cursor.execute('SELECT last_daily_date, coin FROM users WHERE user_id = ?', (user_id,))
+    data = cursor.fetchone()
+    today = datetime.utcnow().date()
+    if data:
+        last_date_str, coin = data
+        if last_date_str:
+            last_date = datetime.strptime(last_date_str, '%Y-%m-%d').date()
+            if last_date >= today:
+                return False
+        coin += 1
+        cursor.execute('UPDATE users SET last_daily_date = ?, coin = ? WHERE user_id = ?',
+                       (today.strftime('%Y-%m-%d'), coin, user_id))
+        conn.commit()
+        return True
+    return False
+
+# دکمه‌های کاربر
+def user_menu():
+    markup = ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.row("🎁 امتیاز روزانه", "📊 اطلاعات من")
+    markup.row("🛒 خرید اشتراک", "💬 چت با AI")
+    markup.row("🎮 بازی‌ها")
+    return markup
+
+# سوالات بازی جرأت و حقیقت
+dare_questions = [
+    "یک رقص کوتاه انجام بده!",
+    "یک چیز خنده‌دار بگو!",
+    "یک پیامک تصادفی به کسی که دوست داری بفرست!",
+    "یک جوک تعریف کن!",
+    "یک جمله با صدای بلند بگو!"
+]
+
 truth_questions = [
-    "📖 بزرگترین دروغی که گفتی چی بوده؟",
-    "📖 چیزی که از همه مخفی کردی چیه؟",
-    "📖 تا حالا دزدکی کاری کردی؟"
+    "بهترین خاطره‌ات چیست؟",
+    "یک راز از خودت بگو.",
+    "آیا تا به حال دروغ گفته‌ای؟",
+    "از چه چیزی می‌ترسی؟",
+    "دوست داری کجا سفر کنی؟"
 ]
 
-dare_missions = [
-    "🎭 یه صدای عجیب بفرست!",
-    "🎭 به یکی پیام بده: «من عاشقت بودم»",
-    "🎭 بدون توضیح یه شکلک عجیب بفرست!"
-]
+active_games = {}
 
-def main_menu(uid):
-    markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.add("💬 شروع چت ناشناس", "🎭 جرأت و حقیقت")
-    if uid in connected_users:
-        markup.add("❌ قطع چت")
-    bot.send_message(uid, "👇 لطفاً گزینه‌ای را انتخاب کنید:", reply_markup=markup)
+def game_menu():
+    markup = ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.row("جرأت", "حقیقت")
+    markup.row("/stopgame")
+    return markup
+
+# دستورات و هندلرها
+
+@bot.message_handler(commands=['start'])
+def send_welcome(message):
+    register_user(message.from_user)
+    bot.send_message(message.chat.id, f"سلام {message.from_user.first_name}! خوش آمدی 👋", reply_markup=user_menu())
+
+@bot.message_handler(func=lambda m: m.text == "🎁 امتیاز روزانه")
+def daily_point_button(message):
+    if add_daily_point(message.from_user.id):
+        bot.send_message(message.chat.id, "✅ یک امتیاز اضافه شد.")
+    else:
+        bot.send_message(message.chat.id, "⏳ امروز قبلاً امتیاز گرفتی. فردا بیا دوباره.")
+
+@bot.message_handler(func=lambda m: m.text == "📊 اطلاعات من")
+def my_info(message):
+    cursor.execute('SELECT coin, gold, diamond, subscription_level FROM users WHERE user_id = ?', (message.from_user.id,))
+    coin, gold, diamond, level = cursor.fetchone()
+    msg = f"""📊 اطلاعات تو:
+
+🪙 سکه: {coin}
+💛 طلایی: {gold}
+💎 الماسی: {diamond}
+🎖 اشتراک: {level}
+"""
+    bot.send_message(message.chat.id, msg)
+
+@bot.message_handler(func=lambda m: m.text == "🛒 خرید اشتراک")
+def buy_subscription(message):
+    bot.send_message(message.chat.id, "🛒 این بخش بزودی فعال می‌شود...")
+
+@bot.message_handler(func=lambda m: m.text == "🎮 بازی‌ها")
+def show_games(message):
+    bot.send_message(message.chat.id, "🎮 بازی جرأت و حقیقت شروع شد! برای بازی یکی از گزینه‌ها را انتخاب کن:", reply_markup=game_menu())
+    active_games[message.from_user.id] = True
+
+@bot.message_handler(func=lambda m: m.text in ["جرأت", "حقیقت"])
+def handle_game_choice(message):
+    user_id = message.from_user.id
+    if user_id not in active_games:
+        bot.send_message(message.chat.id, "برای شروع بازی ابتدا دکمه «🎮 بازی‌ها» را بزن.")
+        return
+
+    if message.text == "جرأت":
+        question = random.choice(dare_questions)
+    else:
+        question = random.choice(truth_questions)
+    bot.send_message(message.chat.id, question)
+
+@bot.message_handler(commands=['stopgame'])
+def stop_game(message):
+    user_id = message.from_user.id
+    if user_id in active_games:
+        del active_games[user_id]
+        bot.send_message(message.chat.id, "بازی متوقف شد. هر وقت خواستی دوباره بازی کن!")
+    else:
+        bot.send_message(message.chat.id, "شما الان بازی نمی‌کنی!")
+
+def chat_with_gpt(user_id, user_message):
+    save_to_memory(user_id, "user", user_message)
+    messages = [{"role": "system", "content": "تو یک هوش مصنوعی فارسی‌زبان، صمیمی و باهوش هستی."}]
+    messages += get_chat_history(user_id)
+
+    headers = {
+        "Authorization": f"Bearer {OPENAI_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    body = {
+        "model": "gpt-3.5-turbo",
+        "messages": messages
+    }
+
+    response = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, data=json.dumps(body))
+    if response.status_code == 200:
+        reply = response.json()['choices'][0]['message']['content']
+        save_to_memory(user_id, "assistant", reply)
+        return reply
+    else:
+        return "❌ مشکلی در اتصال با هوش مصنوعی پیش آمد."
+
+@bot.message_handler(func=lambda m: m.text == "💬 چت با AI")
+def start_ai_chat(message):
+    bot.send_message(message.chat.id, "🧠 حالت چت با هوش مصنوعی فعال شد! هرچی خواستی بپرس:")
+
+@bot.message_handler(func=lambda m: True)
+def ai_chat_handler(message):
+    if message.text in ["🎁 امتیاز روزانه", "📊 اطلاعات من", "🛒 خرید اشتراک", "🎮 بازی‌ها", "جرأت", "حقیقت", "/stopgame"]:
+        return
+    user_id = message.from_user.id
+    bot.send_chat_action(message.chat.id, 'typing')
+    response = chat_with_gpt(user_id, message.text)
+    bot.send_message(message.chat.id, response)
 
 @app.route('/', methods=['POST'])
 def webhook():
-    if request.headers.get('content-type') == 'application/json':
-        update = telebot.types.Update.de_json(request.data.decode('utf-8'))
-        bot.process_new_updates([update])
-        return '', 200
-    return 'Invalid content type', 403
+    bot.process_new_updates([telebot.types.Update.de_json(request.data.decode("utf-8"))])
+    return '', 200
 
-@bot.message_handler(commands=['start'])
-def start(message):
-    uid = message.from_user.id
-    if uid == ADMIN_ID:
-        markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
-        markup.add("📊 پنل مدیریت")
-        bot.send_message(uid, "سلام مدیر عزیز، به ربات خوش آمدی.", reply_markup=markup)
-    else:
-        main_menu(uid)
-
-@bot.message_handler(func=lambda m: m.text == "📊 پنل مدیریت" and m.from_user.id == ADMIN_ID)
-def admin_panel(message):
-    markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.add("🚫 قطع چت فعال", "❌ بستن پنل")
-    bot.send_message(message.chat.id, "📍 پنل مدیریت:", reply_markup=markup)
-
-@bot.message_handler(func=lambda m: m.text == "❌ بستن پنل" and m.from_user.id == ADMIN_ID)
-def close_panel(message):
-    main_menu(message.chat.id)
-
-@bot.message_handler(func=lambda m: m.text == "🚫 قطع چت فعال" and m.from_user.id == ADMIN_ID)
-def disconnect_all(message):
-    for uid in list(connected_users):
-        pid = connected_users[uid]
-        if pid:
-            bot.send_message(uid, "❌ چت شما توسط مدیر قطع شد.")
-            bot.send_message(pid, "❌ چت شما توسط مدیر قطع شد.")
-            connected_users.pop(uid, None)
-            connected_users.pop(pid, None)
-    bot.send_message(message.chat.id, "✅ همه چت‌های فعال قطع شدند.")
-
-@bot.message_handler(func=lambda m: m.text == "💬 شروع چت ناشناس")
-def start_chat(message):
-    uid = message.from_user.id
-    if uid in connected_users:
-        return bot.send_message(uid, "📌 شما هم‌اکنون در یک چت هستید.")
-    pending_requests.add(uid)
-    for u in pending_requests:
-        if u != uid:
-            bot.send_message(u, f"📨 یک نفر درخواست چت ناشناس داده است.\nبرای قبول روی /accept_{uid} بزنید.")
-    bot.send_message(uid, "📡 درخواست شما برای کاربران دیگر ارسال شد...")
-
-@bot.message_handler(func=lambda m: m.text.startswith("/accept_"))
-def accept_request(message):
-    try:
-        target_id = int(message.text.split("_")[1])
-        user_id = message.from_user.id
-        if user_id in pending_requests and target_id in pending_requests:
-            connected_users[user_id] = target_id
-            connected_users[target_id] = user_id
-            pending_requests.remove(user_id)
-            pending_requests.remove(target_id)
-            bot.send_message(user_id, "✅ به یک کاربر متصل شدید. گفتگو را شروع کنید!")
-            bot.send_message(target_id, "✅ یک نفر درخواست شما را پذیرفت. گفتگو شروع شد!")
-    except:
-        pass
-
-@bot.message_handler(func=lambda m: m.text == "❌ قطع چت")
-def disconnect(message):
-    uid = message.from_user.id
-    pid = connected_users.get(uid)
-    if pid:
-        bot.send_message(pid, "🔌 طرف مقابل چت را قطع کرد.")
-        connected_users.pop(pid, None)
-    connected_users.pop(uid, None)
-    main_menu(uid)
-
-@bot.message_handler(func=lambda m: m.text == "🎭 جرأت و حقیقت")
-def start_truth_dare(message):
-    uid = message.from_user.id
-    if uid in truth_dare_sessions:
-        return bot.send_message(uid, "⏳ شما در حال حاضر در بازی هستید.")
-    truth_dare_sessions[uid] = {"partner": None, "turn": "truth", "last_question": ""}
-    for u in truth_dare_sessions:
-        if u != uid and truth_dare_sessions[u]["partner"] is None:
-            truth_dare_sessions[uid]["partner"] = u
-            truth_dare_sessions[u]["partner"] = uid
-            send_truth_or_dare(uid)
-            send_truth_or_dare(u)
-            return
-    bot.send_message(uid, "🔍 در حال جستجوی بازیکن...")
-
-def send_truth_or_dare(uid):
-    data = truth_dare_sessions[uid]
-    partner = data["partner"]
-    if data["turn"] == "truth":
-        q = choice(truth_questions)
-        data["last_question"] = q
-        bot.send_message(uid, f"❓ سوال حقیقت:\n{q}")
-    else:
-        q = choice(dare_missions)
-        data["last_question"] = q
-        bot.send_message(uid, f"🎯 ماموریت جرأت:\n{q}")
-
-@bot.message_handler(func=lambda m: m.from_user.id in truth_dare_sessions)
-def handle_truth_dare_reply(message):
-    uid = message.from_user.id
-    session = truth_dare_sessions.get(uid)
-    if not session: return
-    partner = session["partner"]
-    if not partner: return
-
-    # ارسال پاسخ به طرف مقابل
-    bot.send_message(partner, f"👤 پاسخ طرف مقابل به سوال قبلی:\n{message.text}")
-    
-    # گزینه قبول یا رد
-    markup = telebot.types.InlineKeyboardMarkup()
-    markup.add(
-        telebot.types.InlineKeyboardButton("✅ قبول", callback_data=f"td_accept_{uid}"),
-        telebot.types.InlineKeyboardButton("❌ قابل قبول نیست", callback_data=f"td_reject_{uid}")
-    )
-    bot.send_message(partner, "👀 آیا پاسخ طرف مقابل را قبول دارید؟", reply_markup=markup)
-
-@bot.callback_query_handler(func=lambda c: c.data.startswith("td_"))
-def handle_td_buttons(call):
-    parts = call.data.split("_")
-    action = parts[1]
-    uid = int(parts[2])
-    partner = call.from_user.id
-
-    if action == "accept":
-        truth_dare_sessions[uid]["turn"] = "dare" if truth_dare_sessions[uid]["turn"] == "truth" else "truth"
-        send_truth_or_dare(uid)
-    elif action == "reject":
-        q = truth_dare_sessions[uid]["last_question"]
-        bot.send_message(uid, f"🚫 طرف مقابل پاسخ شما را نپذیرفت.\nلطفاً دوباره به این پاسخ دهید:\n{q}")
-
-@bot.message_handler(func=lambda m: m.from_user.id in connected_users and connected_users[m.from_user.id] is not None)
-def anonymous_message(message):
-    uid = message.from_user.id
-    pid = connected_users[uid]
-    bot.send_message(pid, message.text)
-
-@bot.message_handler(func=lambda m: True)
-def unknown(message):
-    bot.send_message(message.chat.id, "❓ دستور ناشناس. لطفاً از منو استفاده کنید.")
-
-# اجرای برنامه
-if __name__ == "__main__":
+def set_webhook():
     bot.remove_webhook()
     bot.set_webhook(url=WEBHOOK_URL)
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host='0.0.0.0', port=port)
+
+if __name__ == '__main__':
+    set_webhook()
+    app.run(host='0.0.0.0', port=8000)
