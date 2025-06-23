@@ -4,7 +4,7 @@ import json
 import os
 import openai
 
-API_TOKEN = "7217912729:AAFihwxHEbbaMJec31GhFYlfaUA1jXxU-Ac"
+API_TOKEN = "7217912729:AAE8pW3xQE8hmhqJtN08EU4oAqii8ilDRic"
 OPENAI_API_KEY = "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"
 ADMIN_ID = 6994772164
 
@@ -72,6 +72,33 @@ def handle_inline(call):
         bot.register_next_step_handler_by_chat_id(uid, ai_chat)
     elif call.data == "admin" and uid == ADMIN_ID:
         admin_panel(uid)
+    elif call.data == "setmode" and uid == ADMIN_ID:
+        SETTINGS["mode"] = "DIAMOND" if SETTINGS["mode"] == "TON" else "TON"
+        bot.send_message(uid, f"حالت مصرف روی {SETTINGS['mode']} تنظیم شد.")
+    elif call.data == "setcost" and uid == ADMIN_ID:
+        bot.send_message(uid, "مقدار جدید هزینه هر پیام را بفرست.")
+        bot.register_next_step_handler_by_chat_id(uid, save_cost)
+    elif call.data == "broadcast" and uid == ADMIN_ID:
+        bot.send_message(uid, "پیام همگانی رو بفرست.")
+        bot.register_next_step_handler_by_chat_id(uid, do_broadcast)
+    elif call.data == "listusers" and uid == ADMIN_ID:
+        count = len(users)
+        bot.send_message(uid, f"تعداد کاربران: {count}")
+
+def save_cost(message):
+    try:
+        SETTINGS["cost"] = int(message.text.strip())
+        bot.reply_to(message, f"هزینه جدید: {SETTINGS['cost']}")
+    except:
+        bot.reply_to(message, "عدد نامعتبر")
+
+def do_broadcast(message):
+    for uid in users:
+        try:
+            bot.send_message(uid, message.text)
+        except:
+            continue
+    bot.reply_to(message, "پیام به همه ارسال شد.")
 
 def admin_panel(uid):
     markup = telebot.types.InlineKeyboardMarkup()
@@ -81,63 +108,31 @@ def admin_panel(uid):
     markup.add(telebot.types.InlineKeyboardButton("📊 لیست کاربران", callback_data="listusers"))
     bot.send_message(uid, "پنل مدیریت:", reply_markup=markup)
 
-@bot.callback_query_handler(func=lambda call: call.data == "setmode")
-def change_mode(call):
-    SETTINGS["mode"] = "DIAMOND" if SETTINGS["mode"] == "TON" else "TON"
-    bot.send_message(call.message.chat.id, f"حالت مصرف روی {SETTINGS['mode']} تنظیم شد.")
-
-@bot.callback_query_handler(func=lambda call: call.data == "setcost")
-def change_cost(call):
-    bot.send_message(call.message.chat.id, "مقدار جدید هزینه هر پیام را بفرست.")
-    bot.register_next_step_handler(call.message, save_cost)
-
-def save_cost(msg):
-    try:
-        SETTINGS["cost"] = int(msg.text.strip())
-        bot.reply_to(msg, f"هزینه جدید: {SETTINGS['cost']}")
-    except:
-        bot.reply_to(msg, "عدد نامعتبر")
-
-@bot.callback_query_handler(func=lambda call: call.data == "broadcast")
-def broadcast_start(call):
-    bot.send_message(call.message.chat.id, "پیام همگانی رو بفرست.")
-    bot.register_next_step_handler(call.message, do_broadcast)
-
-def do_broadcast(msg):
-    for uid in users:
-        try:
-            bot.send_message(uid, msg.text)
-        except:
-            continue
-    bot.reply_to(msg, "پیام به همه ارسال شد.")
-
-@bot.callback_query_handler(func=lambda call: call.data == "listusers")
-def list_users(call):
-    count = len(users)
-    bot.send_message(call.message.chat.id, f"تعداد کاربران: {count}")
-
-def ai_chat(msg):
-    uid = str(msg.from_user.id)
+def ai_chat(message):
+    uid = str(message.from_user.id)
     user = get_user(uid)
     mode = SETTINGS["mode"]
     cost = SETTINGS["cost"]
 
     if user[mode] < cost:
-        bot.reply_to(msg, f"امتیاز کافی نداری ({mode})")
+        bot.reply_to(message, f"امتیاز کافی نداری ({mode})")
         return
 
-    prompt = msg.text.strip()
+    prompt = message.text.strip()
     try:
         response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
             messages=[{"role": "user", "content": prompt}],
         )
         reply = response.choices[0].message.content
-        bot.reply_to(msg, reply)
+        bot.reply_to(message, reply)
         user[mode] -= cost
         save_data(users)
     except Exception as e:
-        bot.reply_to(msg, f"خطا: {e}")
+        bot.reply_to(message, f"خطا: {e}")
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    try:
+        app.run(host="0.0.0.0", port=5000)
+    except Exception as e:
+        print(f"Error: {e}")
