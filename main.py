@@ -1,7 +1,7 @@
 import telebot
 from flask import Flask, request
 
-bot = telebot.TeleBot("7217912729:AAEbbFfenQJrBOTSEJYsVWmcVJOmZTOuWuU")
+bot = telebot.TeleBot("7217912729:AAFihwxHEbbaMJec31GhFYlfaUA1jXxU-Ac")
 app = Flask(__name__)
 admin_id = 6994772164  # آیدی عددی مدیر
 
