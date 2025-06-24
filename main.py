@@ -3,7 +3,7 @@ import openai
 from flask import Flask, request
 
 BOT_TOKEN = "7217912729:AAE8pW3xQE8hmhqJtN08EU4oAqii8ilDRic"
-OPENAI_API_KEY = "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"
+OPENAI_API_KEY = "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"
 
 client = openai.OpenAI(api_key=OPENAI_API_KEY)
 bot = telebot.TeleBot(BOT_TOKEN)
@@ -23,13 +23,13 @@ def webhook():
 
 @bot.message_handler(commands=['start'])
 def start(message):
-    bot.send_message(message.chat.id, "سلام! سوالت رو بپرس تا با ChatGPT جواب بدم 🧠")
+    bot.send_message(message.chat.id, "سلام محمد جان! سوالت رو بفرست تا جواب بدم 🤖🧠")
 
 @bot.message_handler(func=lambda m: True)
 def ask_gpt(message):
     try:
         response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
+            model="gpt-3.5-turbo",  # یا "gpt-4o" اگه دسترسی داری
             messages=[{"role": "user", "content": message.text}]
         )
         answer = response.choices[0].message.content
