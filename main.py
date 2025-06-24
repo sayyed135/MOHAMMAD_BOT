@@ -1,7 +1,7 @@
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, Message
 from flask import Flask, request
-import random
+import time, random
 
 API_TOKEN = '7217912729:AAHGslCoRLKfVm1VEZ0qG7riZ3fiGMQ1t7I'
 bot = telebot.TeleBot(API_TOKEN)
@@ -10,9 +10,10 @@ app = Flask(__name__)
 admins = [6994772164]
 users = {}
 anon_waiting = []
+pending_ai = {}
 
-truths = ["آخرین باری که گریه کردی کی بود؟", "تا حالا دزدی کردی؟", "عاشق شدی؟"]
-dares = ["۵ بار بپر بالا و پایین", "به مامانت بگو دوستت دارم", "به یه نفر غریبه بگو سلام قشنگ!"]
+truths = ["آخرین دروغی که گفتی چی بوده؟", "تاحالا حسودی کردی؟", "آخرین بار کی ترسیدی؟"]
+dares = ["۵ تا شنا برو", "به دوستت بگو دوستش داری", "یه سلفی بگیر بفرست برای یکی!"]
 
 def get_keyboard(user_id):
     markup = InlineKeyboardMarkup(row_width=2)
@@ -23,45 +24,46 @@ def get_keyboard(user_id):
         InlineKeyboardButton("AI CHAT 🤖", callback_data='ai_chat'),
         InlineKeyboardButton("چت ناشناس 🕵️", callback_data='anon_chat'),
         InlineKeyboardButton("بازی جرأت و حقیقت 🎯", callback_data='truth_dare'),
-        InlineKeyboardButton("تغییر حالت چت 🔁", callback_data='change_mode'),
-        InlineKeyboardButton("ارسال پیام همگانی 📢", callback_data='broadcast'),
-        InlineKeyboardButton("پنل مدیریت 🛠️", callback_data='admin_panel'),
-        InlineKeyboardButton("بستن منو ❌", callback_data='close')
+        InlineKeyboardButton("تغییر حالت چت 🔁", callback_data='change_mode')
     )
+    if user_id in admins:
+        markup.add(
+            InlineKeyboardButton("ارسال پیام همگانی 📢", callback_data='broadcast'),
+            InlineKeyboardButton("پنل مدیریت 🛠️", callback_data='admin_panel')
+        )
+    markup.add(InlineKeyboardButton("بستن منو ❌", callback_data='close'))
     return markup
 
 @bot.message_handler(commands=['start'])
 def start(message: Message):
-    user_id = message.from_user.id
-    if user_id not in users:
-        users[user_id] = {'score': 0, 'level': 'عادی', 'mode': 'معمولی', 'anon': None}
-    bot.send_message(user_id, "سلام 👋 خوش آمدی!", reply_markup=get_keyboard(user_id))
-
-@bot.message_handler(func=lambda m: users.get(m.from_user.id, {}).get('anon') is not None)
-def handle_anon_chat(message: Message):
-    sender = message.from_user.id
-    partner = users[sender]['anon']
-    if partner and partner in users:
-        bot.send_message(partner, f"📨 پیام ناشناس:\n{message.text}")
-    else:
-        bot.send_message(sender, "❗ طرف مقابل قطع شده.")
+    uid = message.from_user.id
+    if uid not in users:
+        users[uid] = {'score': 0, 'level': 'عادی', 'mode': 'معمولی', 'anon': None, 'last_daily': 0}
+    bot.send_message(uid, "سلام عزیز 😄 به ربات خوش آمدی!", reply_markup=get_keyboard(uid))
 
 @bot.callback_query_handler(func=lambda call: True)
 def callback_handler(call):
-    user_id = call.from_user.id
+    uid = call.from_user.id
     data = call.data
 
-    if user_id not in users:
-        users[user_id] = {'score': 0, 'level': 'عادی', 'mode': 'معمولی', 'anon': None}
+    if uid not in users:
+        users[uid] = {'score': 0, 'level': 'عادی', 'mode': 'معمولی', 'anon': None, 'last_daily': 0}
 
     if data == 'daily_score':
-        users[user_id]['score'] += 1
-        bot.answer_callback_query(call.id, "✅ ۱ امتیاز اضافه شد!")
+        now = time.time()
+        if now - users[uid]['last_daily'] < 86400:
+            bot.answer_callback_query(call.id, "⏳ فقط هر ۲۴ ساعت یه‌بار می‌تونی بگیری!")
+            return
+        level = users[uid]['level']
+        amount = 50 if level == 'VIP' else 20 if level == 'حرفه‌ای' else 5
+        users[uid]['score'] += amount
+        users[uid]['last_daily'] = now
+        bot.answer_callback_query(call.id, f"✅ {amount} امتیاز دادی!")
 
     elif data == 'my_info':
-        u = users[user_id]
-        text = f"🎯 اطلاعات شما:\nامتیاز: {u['score']}\nسطح: {u['level']}\nحالت چت: {u['mode']}"
-        bot.edit_message_text(chat_id=user_id, message_id=call.message.message_id, text=text, reply_markup=get_keyboard(user_id))
+        u = users[uid]
+        msg = f"🏷 امتیاز: {u['score']}\n📦 سطح: {u['level']}\n💬 حالت چت: {u['mode']}"
+        bot.edit_message_text(chat_id=uid, message_id=call.message.message_id, text=msg, reply_markup=get_keyboard(uid))
 
     elif data == 'buy_vip':
         markup = InlineKeyboardMarkup()
@@ -70,48 +72,34 @@ def callback_handler(call):
             InlineKeyboardButton("حرفه‌ای - ۱۰🪙", callback_data='buy_pro'),
             InlineKeyboardButton("VIP - ۲۰🪙", callback_data='buy_vip2')
         )
-        bot.edit_message_text(chat_id=user_id, message_id=call.message.message_id, text="🎁 سطح موردنظر را انتخاب کن:", reply_markup=markup)
+        bot.edit_message_text(chat_id=uid, message_id=call.message.message_id, text="🎁 اشتراک مورد نظر را انتخاب کن:", reply_markup=markup)
 
-    elif data == 'buy_normal':
-        if users[user_id]['score'] >= 5:
-            users[user_id]['score'] -= 5
-            users[user_id]['level'] = 'معمولی'
-            bot.answer_callback_query(call.id, "✅ سطح شما به معمولی تغییر یافت.")
-        else:
-            bot.answer_callback_query(call.id, "❌ امتیاز کافی نداری!")
-
-    elif data == 'buy_pro':
-        if users[user_id]['score'] >= 10:
-            users[user_id]['score'] -= 10
-            users[user_id]['level'] = 'حرفه‌ای'
-            bot.answer_callback_query(call.id, "✅ سطح شما به حرفه‌ای تغییر یافت.")
-        else:
-            bot.answer_callback_query(call.id, "❌ امتیاز کافی نداری!")
-
-    elif data == 'buy_vip2':
-        if users[user_id]['score'] >= 20:
-            users[user_id]['score'] -= 20
-            users[user_id]['level'] = 'VIP'
-            bot.answer_callback_query(call.id, "✅ سطح شما به VIP تغییر یافت.")
+    elif data.startswith("buy_"):
+        levels = {'buy_normal': ('معمولی', 5), 'buy_pro': ('حرفه‌ای', 10), 'buy_vip2': ('VIP', 20)}
+        level, cost = levels[data]
+        if users[uid]['score'] >= cost:
+            users[uid]['score'] -= cost
+            users[uid]['level'] = level
+            bot.answer_callback_query(call.id, f"✅ سطح شما به {level} تغییر کرد.")
         else:
             bot.answer_callback_query(call.id, "❌ امتیاز کافی نداری!")
 
     elif data == 'ai_chat':
-        bot.send_message(user_id, "🤖 بپرس: (مثل: ۲+۲؟)")
+        bot.send_message(uid, "🤖 سوالتو بپرس:")
         bot.register_next_step_handler(call.message, simple_ai)
 
     elif data == 'anon_chat':
-        if users[user_id]['anon'] is not None:
-            bot.send_message(user_id, "🔴 شما در حال چت هستید.")
-        elif anon_waiting and anon_waiting[0] != user_id:
+        if users[uid]['anon']:
+            bot.send_message(uid, "🔴 شما در حال چت ناشناس هستید.")
+        elif anon_waiting and anon_waiting[0] != uid:
             partner = anon_waiting.pop(0)
-            users[user_id]['anon'] = partner
-            users[partner]['anon'] = user_id
-            bot.send_message(user_id, "🟢 به یک نفر وصل شدی!")
+            users[uid]['anon'] = partner
+            users[partner]['anon'] = uid
+            bot.send_message(uid, "🟢 به یک نفر وصل شدی!")
             bot.send_message(partner, "🟢 یک نفر بهت وصل شد!")
         else:
-            anon_waiting.append(user_id)
-            bot.send_message(user_id, "⏳ منتظر طرف مقابل...")
+            anon_waiting.append(uid)
+            bot.send_message(uid, "⏳ منتظر طرف مقابل هستی...")
 
     elif data == 'truth_dare':
         markup = InlineKeyboardMarkup()
@@ -119,78 +107,134 @@ def callback_handler(call):
             InlineKeyboardButton("🎯 حقیقت", callback_data='truth'),
             InlineKeyboardButton("🔥 جرأت", callback_data='dare')
         )
-        bot.send_message(user_id, "بازی رو انتخاب کن:", reply_markup=markup)
+        bot.send_message(uid, "چی انتخاب می‌کنی؟", reply_markup=markup)
 
     elif data == 'truth':
-        bot.send_message(user_id, "❓ " + random.choice(truths))
+        bot.send_message(uid, "❓ " + random.choice(truths))
 
     elif data == 'dare':
-        bot.send_message(user_id, "🔥 " + random.choice(dares))
+        bot.send_message(uid, "🔥 " + random.choice(dares))
 
     elif data == 'change_mode':
-        mode = users[user_id]['mode']
-        next_mode = 'شوخی' if mode == 'معمولی' else 'عاشقانه' if mode == 'شوخی' else 'معمولی'
-        users[user_id]['mode'] = next_mode
-        bot.answer_callback_query(call.id, f"💬 حالت چت شد: {next_mode}")
+        current = users[uid]['mode']
+        next_mode = 'شوخی' if current == 'معمولی' else 'عاشقانه' if current == 'شوخی' else 'معمولی'
+        users[uid]['mode'] = next_mode
+        bot.answer_callback_query(call.id, f"💬 حالت چت تغییر کرد به: {next_mode}")
 
-    elif data == 'broadcast' and user_id in admins:
-        bot.send_message(user_id, "📢 پیام همگانی رو بفرست:")
+    elif data == 'broadcast' and uid in admins:
+        bot.send_message(uid, "📢 پیام همگانی را ارسال کن:")
         bot.register_next_step_handler(call.message, handle_broadcast)
 
-    elif data == 'admin_panel' and user_id in admins:
+    elif data == 'admin_panel' and uid in admins:
         markup = InlineKeyboardMarkup()
         markup.add(
-            InlineKeyboardButton("📊 نمایش کاربران", callback_data='show_users'),
-            InlineKeyboardButton("🛠 تنظیم امتیاز", callback_data='set_score'),
+            InlineKeyboardButton("📊 لیست کاربران", callback_data='show_users'),
+            InlineKeyboardButton("🛠 تغییر امتیاز", callback_data='set_score'),
             InlineKeyboardButton("↩ خروج", callback_data='back')
         )
-        bot.edit_message_text(chat_id=user_id, message_id=call.message.message_id, text="پنل مدیریت:", reply_markup=markup)
+        bot.edit_message_text(chat_id=uid, message_id=call.message.message_id, text="پنل مدیریت:", reply_markup=markup)
 
     elif data == 'show_users':
         msg = "\n".join([str(i) for i in users])
-        bot.send_message(user_id, f"📋 کاربران ثبت شده:\n{msg}")
+        bot.send_message(uid, f"📋 کاربران:\n{msg}")
 
     elif data == 'set_score':
-        bot.send_message(user_id, "🔢 فرمت: آیدی امتیاز\nمثال: 123456789 10")
+        bot.send_message(uid, "🔢 بنویس: id امتیاز\nمثال: 123456789 10")
         bot.register_next_step_handler(call.message, set_score)
 
     elif data == 'back':
-        bot.send_message(user_id, "↩ برگشتی به منو", reply_markup=get_keyboard(user_id))
+        bot.send_message(uid, "↩ بازگشتی به منو", reply_markup=get_keyboard(uid))
 
     elif data == 'close':
-        bot.delete_message(user_id, call.message.message_id)
+        bot.delete_message(uid, call.message.message_id)
+
+    elif data.startswith("ai_reply:"):
+        _, tid, _ = data.split(":")
+        tid = int(tid)
+        bot.send_message(uid, f"✍ پاسخ برای کاربر {tid}:")
+        bot.register_next_step_handler(call.message, lambda m: send_ai_reply(m, tid))
+
+    elif data.startswith("ai_warn:"):
+        _, tid = data.split(":")
+        tid = int(tid)
+        bot.send_message(tid, "⚠️ لطفاً از ارسال کلمات نامفهوم به AI خودداری کنید.")
+        bot.answer_callback_query(call.id, "❗ اخطار فرستاده شد.")
+
+@bot.message_handler(func=lambda m: users.get(m.from_user.id, {}).get('anon'))
+def handle_anon_chat(message):
+    uid = message.from_user.id
+    partner = users[uid]['anon']
+    if users[uid]['score'] < 1:
+        bot.send_message(uid, "❌ برای ارسال پیام ناشناس، حداقل ۱ امتیاز نیاز داری.")
+        return
+    if partner and partner in users:
+        users[uid]['score'] -= 1
+        bot.send_message(partner, f"🕵️ پیام ناشناس:\n{message.text}")
+    else:
+        bot.send_message(uid, "⚠ طرف مقابل قطع شده.")
+
+def simple_ai(message):
+    uid = message.from_user.id
+    text = message.text.strip()
+    responses = {
+        "سلام": "سلام رفیق 🌸",
+        "خوبی؟": "آره تو خوبی؟",
+        "اسمت چیه؟": "من ربات محمدم",
+        "دوستت دارم": "منم همینطور 😍",
+        "شوخی بگو": "رفتم دکتر گفت چرا اومدی گفتم با تاکسی 😂",
+        "خداحافظ": "فعلاً 🖐",
+        "جوک بگو": "یه گربه می‌رفت مدرسه، دیر رسید، گفت میوخشید 😹",
+        "خسته‌ام": "یک چای بخور و استراحت کن 🍵",
+        "غمگینم": "دلت رو بسپار به خدا 🌈",
+        "عاشق شدم": "مبارکه! دل بده ولی عاقلانه 😅"
+        # ادامه بده تا ۵۰ تا
+    }
+    if text in responses:
+        bot.send_message(uid, responses[text])
+    else:
+        bot.send_message(uid, "📌 این کلمه‌تو بعدش جواب می‌دم 😉")
+        for admin in admins:
+            bot.send_message(admin, f"📨 پیام ناشناخته از [{uid}](tg://user?id={uid}):\n{text}",
+                             parse_mode="Markdown", reply_markup=ai_admin_reply_markup(uid, message.message_id))
+
+def ai_admin_reply_markup(uid, msgid):
+    markup = InlineKeyboardMarkup()
+    markup.add(
+        InlineKeyboardButton("🔁 پاسخ به کاربر", callback_data=f"ai_reply:{uid}:{msgid}"),
+        InlineKeyboardButton("⚠ اخطار", callback_data=f"ai_warn:{uid}")
+    )
+    return markup
+
+def send_ai_reply(message, tid):
+    try:
+        bot.send_message(tid, f"📩 پاسخ مدیر:\n{message.text}")
+        bot.send_message(message.chat.id, "✅ پاسخ فرستاده شد.")
+    except:
+        bot.send_message(message.chat.id, "❌ خطا در ارسال.")
 
 def handle_broadcast(message):
     for uid in users:
         try:
-            bot.send_message(uid, f"📢 پیام از مدیر:\n{message.text}")
+            bot.send_message(uid, f"📢 پیام مدیر:\n{message.text}")
         except:
             pass
-    bot.send_message(message.chat.id, "✅ پیام برای همه فرستاده شد.")
+    bot.send_message(message.chat.id, "✅ پیام برای همه ارسال شد.")
 
 def set_score(message):
     try:
-        uid, score = map(int, message.text.strip().split())
+        uid, score = map(int, message.text.split())
         if uid in users:
             users[uid]['score'] = score
             bot.send_message(message.chat.id, "✅ امتیاز تنظیم شد.")
         else:
-            bot.send_message(message.chat.id, "❌ کاربر یافت نشد.")
+            bot.send_message(message.chat.id, "❌ کاربر پیدا نشد.")
     except:
         bot.send_message(message.chat.id, "❗ فرمت اشتباهه.")
-
-def simple_ai(message):
-    try:
-        answer = eval(message.text.strip())
-        bot.send_message(message.chat.id, f"✅ جواب: {answer}")
-    except:
-        bot.send_message(message.chat.id, "🤖 نتونستم بفهمم!")
 
 @app.route('/', methods=['POST'])
 def webhook():
     if request.headers.get('content-type') == 'application/json':
-        json_string = request.get_data().decode('utf-8')
-        update = telebot.types.Update.de_json(json_string)
+        update = telebot.types.Update.de_json(request.data.decode('utf-8'))
         bot.process_new_updates([update])
         return '', 200
     return 'Invalid', 403
