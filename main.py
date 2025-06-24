@@ -3,7 +3,7 @@ import openai
 from flask import Flask, request
 
 BOT_TOKEN = "7217912729:AAE8pW3xQE8hmhqJtN08EU4oAqii8ilDRic"
-OPENAI_API_KEY = "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"
+OPENAI_API_KEY = "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"
 
 client = openai.OpenAI(api_key=OPENAI_API_KEY)
 bot = telebot.TeleBot(BOT_TOKEN)
@@ -11,7 +11,7 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "ربات فعاله ✅"
+    return "ربات آنلاین است ✅"
 
 @app.route('/', methods=['POST'])
 def webhook():
