@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: chatgpt-bot
+    name: chatgpt-telegram
     env: python
     plan: free
     buildCommand: ""
