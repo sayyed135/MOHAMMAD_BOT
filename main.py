@@ -12,9 +12,6 @@ users = {}
 anon_waiting = []
 gift_codes = {}
 
-truths = ["آخرین دروغی که گفتی چی بوده؟", "تاحالا حسودی کردی؟", "آخرین بار کی ترسیدی؟"]
-dares = ["۵ تا شنا برو", "به دوستت بگو دوستش داری", "یه سلفی بگیر بفرست برای یکی!"]
-
 def get_keyboard(user_id):
     markup = InlineKeyboardMarkup(row_width=2)
     markup.add(
@@ -146,9 +143,22 @@ def callback_handler(call):
         )
         bot.send_message(uid, "🛠 پنل مدیریت:", reply_markup=markup)
 
-    elif data == 'create_gift' and uid in admins:
+    elif data == 'show_users':
+        if not users:
+            bot.send_message(uid, "❌ هیچ کاربری ثبت نشده.")
+            return
+        msg = "📋 لیست کاربران:\n"
+        for uid2, info in users.items():
+            phone = info.get("phone", "ندارد")
+            msg += f"🆔 {uid2} | 📱 {phone}\n"
+        bot.send_message(uid, msg)
+
+    elif data == 'create_gift':
         bot.send_message(uid, "🎁 کدی که می‌خوای بسازی رو بفرست (مثال: test123):")
         bot.register_next_step_handler(call.message, save_gift_code)
+
+    elif data == 'close':
+        bot.delete_message(uid, call.message.message_id)
 
 def save_bio(message):
     uid = message.from_user.id
