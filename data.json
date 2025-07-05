@@ -1,4 +1,10 @@
 {
-  "user_points": {},
-  "user_invites": {}
+  "user_points": { "123456789": 10 },
+  "user_invites": { "123456789": 3 },
+  "user_info": {
+    "123456789": {
+      "phone": "09350000000",
+      "link": "https://t.me/username"
+    }
+  }
 }
