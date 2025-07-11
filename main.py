@@ -1,138 +1,124 @@
 import telebot
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-import json
-import os
+import sqlite3
 
-TOKEN = '8077313575:AAFUdCtWJ7A4b7nqiP59hEMXRw98hjfsX28'
-CHANNEL_USERNAME = '@SAYYED_AMFUN'
-ADMIN_ID = 6994772164
-
+TOKEN = '7217912729:AAF5rYAR073MlBLoFBc9-ik8r9M0MdyXMds'
 bot = telebot.TeleBot(TOKEN)
 
-DATA_FILE = 'data.json'
+ADMIN_ID = 6994772164
 
-# بارگذاری داده‌ها از فایل
-if os.path.exists(DATA_FILE):
-    with open(DATA_FILE, 'r') as f:
-        data = json.load(f)
-else:
-    data = {
-        "user_points": {},
-        "user_invites": {}
-    }
+# اتصال به دیتابیس
+conn = sqlite3.connect('users.db', check_same_thread=False)
+cursor = conn.cursor()
 
-user_points = data["user_points"]
-user_invites = data["user_invites"]
+# ایجاد جدول کاربران
+cursor.execute('''
+    CREATE TABLE IF NOT EXISTS users (
+        user_id INTEGER PRIMARY KEY,
+        name TEXT,
+        phone TEXT
+    )
+''')
+conn.commit()
 
-def save_data():
-    with open(DATA_FILE, 'w') as f:
-        json.dump({
-            "user_points": user_points,
-            "user_invites": user_invites
-        }, f)
-
-def is_member(user_id):
-    try:
-        status = bot.get_chat_member(CHANNEL_USERNAME, user_id).status
-        return status in ['member', 'administrator', 'creator']
-    except:
-        return False
+# منوی کاربر
+def user_menu():
+    keyboard = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
+    btn1 = telebot.types.KeyboardButton("📞 ثبت شماره")
+    btn2 = telebot.types.KeyboardButton("✉️ ارسال پیام به مدیریت")
+    keyboard.add(btn1)
+    keyboard.add(btn2)
+    return keyboard
 
 @bot.message_handler(commands=['start'])
 def start(message):
-    user_id = str(message.from_user.id)
-    args = message.text.split()
-
-    if user_id not in user_points:
-        user_points[user_id] = 0
-        user_invites[user_id] = 0
-        save_data()
-
-    if len(args) > 1:
-        inviter_id = args[1]
-        if inviter_id != user_id and is_member(message.from_user.id):
-            user_points[inviter_id] = user_points.get(inviter_id, 0) + 5
-            user_invites[inviter_id] = user_invites.get(inviter_id, 0) + 1
-            save_data()
-            try:
-                bot.send_message(int(inviter_id), f"🎉 یه نفر با دعوتت عضو شد!\nامتیاز جدید: {user_points[inviter_id]}")
-            except:
-                pass
-
-    invite_link = f"https://t.me/SAYYED_AMFUN?start={user_id}"
-
-    text = f"""👋 سلام {message.from_user.first_name}!
-
-⭐ امتیاز شما: {user_points[user_id]}
-👥 دعوت‌شده‌ها: {user_invites[user_id]}
-
-👇 لینک اختصاصی دعوت شما:
-{invite_link}
-"""
-
-    keyboard = InlineKeyboardMarkup()
-    keyboard.add(InlineKeyboardButton("📢 عضویت در کانال", url="https://t.me/SAYYED_AMFUN"))
-    bot.send_message(message.chat.id, text, reply_markup=keyboard)
-
-@bot.message_handler(commands=['points'])
-def points(message):
-    user_id = str(message.from_user.id)
-    pts = user_points.get(user_id, 0)
-    inv = user_invites.get(user_id, 0)
-    bot.send_message(message.chat.id, f"⭐ امتیاز: {pts}\n👥 دعوت‌شده‌ها: {inv}")
-
-@bot.message_handler(commands=['admin'])
-def admin(message):
-    if message.from_user.id == ADMIN_ID:
-        kb = InlineKeyboardMarkup()
-        kb.add(InlineKeyboardButton("📄 لیست کاربران", callback_data="list"))
-        kb.add(InlineKeyboardButton("➕ تنظیم امتیاز", callback_data="set"))
-        kb.add(InlineKeyboardButton("📢 ارسال پیام همگانی", callback_data="send"))
-        bot.send_message(message.chat.id, "🔐 پنل مدیریت:", reply_markup=kb)
-    else:
-        bot.send_message(message.chat.id, "🚫 دسترسی نداری!")
-
-@bot.callback_query_handler(func=lambda c: True)
-def callbacks(c):
-    if c.from_user.id != ADMIN_ID:
+    user_id = message.from_user.id
+    if user_id == ADMIN_ID:
+        show_admin_panel(message)
         return
 
-    if c.data == "list":
-        if not user_points:
-            bot.send_message(c.message.chat.id, "❌ لیستی نیست.")
-        else:
-            txt = "👥 کاربران:\n"
-            for uid, pts in user_points.items():
-                txt += f"{uid} — {pts} امتیاز\n"
-            bot.send_message(c.message.chat.id, txt)
+    cursor.execute('SELECT * FROM users WHERE user_id=?', (user_id,))
+    if cursor.fetchone():
+        bot.send_message(message.chat.id, "به منوی کاربر خوش آمدید 👇", reply_markup=user_menu())
+    else:
+        bot.send_message(message.chat.id, "سلام! لطفاً اسم خود را وارد کنید:")
+        bot.register_next_step_handler(message, get_name)
 
-    elif c.data == "set":
-        bot.send_message(c.message.chat.id, "فرمت: `آیدی امتیاز` (مثال: 12345 10)")
-        bot.register_next_step_handler(c.message, set_pts)
+def get_name(message):
+    user_id = message.from_user.id
+    name = message.text
+    bot.user_step = getattr(bot, 'user_step', {})
+    bot.user_step[user_id] = name
 
-    elif c.data == "send":
-        bot.send_message(c.message.chat.id, "پیامتو بفرست:")
-        bot.register_next_step_handler(c.message, send_all)
+    # دکمه برای ارسال شماره
+    keyboard = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    button = telebot.types.KeyboardButton("📞 ارسال شماره من", request_contact=True)
+    keyboard.add(button)
 
-def set_pts(msg):
-    try:
-        parts = msg.text.split()
-        uid = parts[0]
-        pts = int(parts[1])
-        user_points[uid] = pts
-        save_data()
-        bot.send_message(msg.chat.id, "✅ تنظیم شد.")
-    except:
-        bot.send_message(msg.chat.id, "❌ خطا! فرمت نادرسته.")
+    bot.send_message(message.chat.id, "حالا روی دکمه زیر بزن تا شماره‌ت ثبت بشه:", reply_markup=keyboard)
 
-def send_all(msg):
-    count = 0
-    for uid in user_points.keys():
-        try:
-            bot.send_message(int(uid), f"📢 پیام مدیر:\n\n{msg.text}")
-            count += 1
-        except:
-            continue
-    bot.send_message(msg.chat.id, f"✅ پیام به {count} نفر ارسال شد.")
+@bot.message_handler(content_types=['contact'])
+def contact_handler(message):
+    user_id = message.from_user.id
+    phone = message.contact.phone_number
+
+    if hasattr(bot, 'user_step') and user_id in bot.user_step:
+        name = bot.user_step[user_id]
+        cursor.execute('INSERT OR REPLACE INTO users (user_id, name, phone) VALUES (?, ?, ?)',
+                       (user_id, name, phone))
+        conn.commit()
+        del bot.user_step[user_id]
+        bot.send_message(message.chat.id, "✅ ثبت‌نام کامل شد", reply_markup=user_menu())
+    else:
+        bot.send_message(message.chat.id, "لطفاً ابتدا /start را بزن و اسم را وارد کن.")
+
+# عملکرد دکمه‌های کاربر
+@bot.message_handler(func=lambda m: m.text == "📞 ثبت شماره")
+def ask_phone_again(message):
+    keyboard = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    button = telebot.types.KeyboardButton("📞 ارسال شماره من", request_contact=True)
+    keyboard.add(button)
+    bot.send_message(message.chat.id, "روی دکمه زیر بزن برای ثبت یا ویرایش شماره:", reply_markup=keyboard)
+
+@bot.message_handler(func=lambda m: m.text == "✉️ ارسال پیام به مدیریت")
+def ask_message_to_admin(message):
+    bot.send_message(message.chat.id, "لطفاً پیام خود را برای مدیریت بنویس:")
+    bot.register_next_step_handler(message, forward_to_admin)
+
+def forward_to_admin(message):
+    user_id = message.from_user.id
+    cursor.execute('SELECT name, phone FROM users WHERE user_id=?', (user_id,))
+    row = cursor.fetchone()
+    name, phone = row if row else ('نامشخص', 'نامشخص')
+
+    text = f"📩 پیام جدید از کاربر:\n\n🆔 {user_id}\n👤 {name}\n📞 {phone}\n\n📨 متن پیام:\n{message.text}"
+    bot.send_message(ADMIN_ID, text)
+    bot.send_message(message.chat.id, "✅ پیام شما برای مدیریت ارسال شد.")
+
+# پنل مدیریت
+def show_admin_panel(message):
+    markup = telebot.types.InlineKeyboardMarkup()
+    btn_info = telebot.types.InlineKeyboardButton("📋 اطلاعات کاربران", callback_data="user_info")
+    markup.add(btn_info)
+    bot.send_message(message.chat.id, "پنل مدیریت 🛠️", reply_markup=markup)
+
+@bot.callback_query_handler(func=lambda call: call.data == "user_info")
+def send_user_info(call):
+    if call.from_user.id != ADMIN_ID:
+        bot.answer_callback_query(call.id, "شما دسترسی ندارید.")
+        return
+
+    cursor.execute('SELECT * FROM users')
+    rows = cursor.fetchall()
+
+    if not rows:
+        bot.send_message(call.message.chat.id, "هیچ کاربری ثبت نشده.")
+        return
+
+    text = "📄 لیست کاربران:\n\n"
+    for row in rows:
+        uid, name, phone = row
+        text += f"🆔 {uid}\n👤 {name}\n📞 {phone}\n\n"
+
+    bot.send_message(call.message.chat.id, text)
 
 bot.infinity_polling()
