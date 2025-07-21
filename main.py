@@ -1,102 +1,88 @@
-from flask import Flask, request
 import telebot
-import json
+from flask import Flask, request
 import os
 
-API_TOKEN = '7217912729:AAE7IXU8LQpwtPLN-BxGDUsF-y7Af36UuQ8'
-ADMIN_ID = 6994772164
-
-bot = telebot.TeleBot(API_TOKEN)
-bot.remove_webhook()
-bot.set_webhook(url='https://mohammad-bot-2.onrender.com/')
-
-
+TOKEN = "8077313575:AAF_B4ZS0_JPyqaJV4gBmqfJsUHh2gGPzsI"
+bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
-# ---- ربات همون قبلی ----
-def save_user_info(user_id, phone=None, link=None):
-    if os.path.exists("users.json"):
-        with open("users.json", "r") as f:
-            try:
-                data = json.load(f)
-            except:
-                data = {}
-    else:
-        data = {}
+# آدرس دامنه‌ی render خودتو همینجا وارد کن
+WEBHOOK_URL = "https://mohammad-bot-2.onrender.com/"
 
-    if str(user_id) not in data:
-        data[str(user_id)] = {}
+waiting_users = []
+active_chats = {}
 
-    if phone:
-        data[str(user_id)]["phone"] = phone
-    if link:
-        data[str(user_id)]["link"] = link
+from telebot.types import ReplyKeyboardMarkup, KeyboardButton
 
-    with open("users.json", "w") as f:
-        json.dump(data, f, indent=2)
-
+def get_main_keyboard():
+    kb = ReplyKeyboardMarkup(resize_keyboard=True)
+    kb.row(KeyboardButton("🎯 شروع چت ناشناس"))
+    kb.row(KeyboardButton("❌ خروج از چت"))
+    return kb
 
 @bot.message_handler(commands=['start'])
 def start(message):
-    markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.row("📲 ثبت شماره", "🔗 ثبت لینک")
-    if message.from_user.id == ADMIN_ID:
-        markup.row("📒 لیست کاربران")
-    bot.send_message(message.chat.id, "یکی از گزینه‌ها را انتخاب کن:", reply_markup=markup)
+    bot.send_message(message.chat.id,
+                     "سلام! به ربات چت ناشناس خوش آمدید.\nروی «🎯 شروع چت ناشناس» بزن تا یه نفر بهت وصل شه!",
+                     reply_markup=get_main_keyboard())
 
+@bot.message_handler(func=lambda m: True)
+def handle_message(message):
+    user_id = message.chat.id
+    text = message.text
 
-@bot.message_handler(func=lambda m: m.text == "📲 ثبت شماره")
-def ask_phone(message):
-    msg = bot.send_message(message.chat.id, "شماره‌ات را بفرست:")
-    bot.register_next_step_handler(msg, save_phone)
+    if text == "🎯 شروع چت ناشناس":
+        if user_id in active_chats:
+            bot.send_message(user_id, "شما الان توی چت هستی.")
+            return
+        if user_id in waiting_users:
+            bot.send_message(user_id, "منتظر اتصال هستی...")
+            return
+        if waiting_users:
+            partner_id = waiting_users.pop(0)
+            active_chats[user_id] = partner_id
+            active_chats[partner_id] = user_id
+            bot.send_message(user_id, "✅ به چت ناشناس وصل شدی!", reply_markup=get_main_keyboard())
+            bot.send_message(partner_id, "✅ یه نفر بهت وصل شد!", reply_markup=get_main_keyboard())
+        else:
+            waiting_users.append(user_id)
+            bot.send_message(user_id, "🔍 منتظر یه نفر دیگه هستی...")
 
-def save_phone(message):
-    phone = message.text.strip()
-    user_id = message.from_user.id
-    save_user_info(user_id, phone=phone)
-    bot.send_message(message.chat.id, "✅ شماره ذخیره شد!")
+    elif text == "❌ خروج از چت":
+        if user_id in active_chats:
+            partner_id = active_chats[user_id]
+            del active_chats[partner_id]
+            del active_chats[user_id]
+            bot.send_message(user_id, "✅ از چت خارج شدی.", reply_markup=get_main_keyboard())
+            bot.send_message(partner_id, "❌ طرف مقابل از چت خارج شد.", reply_markup=get_main_keyboard())
+        elif user_id in waiting_users:
+            waiting_users.remove(user_id)
+            bot.send_message(user_id, "❌ از صف انتظار خارج شدی.", reply_markup=get_main_keyboard())
+        else:
+            bot.send_message(user_id, "⛔ شما الان توی چت نیستی.")
 
+    else:
+        if user_id in active_chats:
+            partner_id = active_chats[user_id]
+            bot.send_message(partner_id, f"👤 ناشناس:\n{text}")
+        else:
+            bot.send_message(user_id, "برای شروع چت ناشناس، روی «🎯 شروع چت ناشناس» بزن.")
 
-@bot.message_handler(func=lambda m: m.text == "🔗 ثبت لینک")
-def ask_link(message):
-    msg = bot.send_message(message.chat.id, "لینک پروفایلت را بفرست:")
-    bot.register_next_step_handler(msg, save_link)
-
-def save_link(message):
-    link = message.text.strip()
-    user_id = message.from_user.id
-    save_user_info(user_id, link=link)
-    bot.send_message(message.chat.id, "✅ لینک ذخیره شد!")
-
-
-@bot.message_handler(func=lambda m: m.text == "📒 لیست کاربران")
-def send_user_list(message):
-    if message.from_user.id != ADMIN_ID:
-        return
-
-    if not os.path.exists("users.json"):
-        bot.send_message(message.chat.id, "هیچ اطلاعاتی ذخیره نشده.")
-        return
-
-    with open("users.json", "r") as f:
-        data = json.load(f)
-
-    text_lines = []
-    for uid, info in data.items():
-        phone = info.get("phone", "ندارد")
-        link = info.get("link", "ندارد")
-        text_lines.append(f"🆔 {uid}\n📞 {phone}\n🔗 {link}\n")
-
-    with open("users.txt", "w", encoding="utf-8") as f:
-        f.write("\n------------------\n".join(text_lines))
-
-    with open("users.txt", "rb") as f:
-        bot.send_document(message.chat.id, f)
-
-# ---- دریافت پیام‌ها از تلگرام ----
+# وبهوک دریافت پیام از تلگرام
 @app.route("/", methods=['POST'])
 def webhook():
-    json_string = request.get_data().decode('utf-8')
-    update = telebot.types.Update.de_json(json_string)
+    update = telebot.types.Update.de_json(request.stream.read().decode("utf-8"))
     bot.process_new_updates([update])
-    return "OK", 200
+    return "!", 200
+
+# برای تست سلامت سرور
+@app.route("/", methods=['GET'])
+def home():
+    return "✅ ربات فعال است", 200
+
+# راه‌اندازی webhook و سرور
+if __name__ == "__main__":
+    bot.remove_webhook()
+    bot.set_webhook(url=WEBHOOK_URL)
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host="0.0.0.0", port=port)
