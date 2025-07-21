@@ -71,5 +71,5 @@ def index():
 if __name__ == "__main__":
     import os
     bot.remove_webhook()
-    bot.set_webhook(url=f"https://your-render-url.onrender.com/{TOKEN}")
+    bot.set_webhook(url=f"https://mohammad-bot-2.onrender.com/{TOKEN}")
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
