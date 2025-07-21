@@ -6,8 +6,7 @@ TOKEN = "8077313575:AAF_B4ZS0_JPyqaJV4gBmqfJsUHh2gGPzsI"
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
-# آدرس دامنه‌ی render خودتو همینجا وارد کن
-WEBHOOK_URL = "https://mohammad-bot-2.onrender.com/"
+WEBHOOK_URL = "https://chatgpt-telegram-bkp1.onrender.com/"
 
 waiting_users = []
 active_chats = {}
@@ -68,19 +67,16 @@ def handle_message(message):
         else:
             bot.send_message(user_id, "برای شروع چت ناشناس، روی «🎯 شروع چت ناشناس» بزن.")
 
-# وبهوک دریافت پیام از تلگرام
 @app.route("/", methods=['POST'])
 def webhook():
     update = telebot.types.Update.de_json(request.stream.read().decode("utf-8"))
     bot.process_new_updates([update])
-    return "!", 200
+    return "OK", 200
 
-# برای تست سلامت سرور
 @app.route("/", methods=['GET'])
 def home():
-    return "✅ ربات فعال است", 200
+    return "✅ ربات در حال اجراست", 200
 
-# راه‌اندازی webhook و سرور
 if __name__ == "__main__":
     bot.remove_webhook()
     bot.set_webhook(url=WEBHOOK_URL)
