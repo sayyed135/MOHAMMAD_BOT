@@ -1,8 +1,9 @@
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 import datetime
+import re
 
-TOKEN = '7217912729:AAE7IXU8LQpwtPLN-BxGDUsF-y7Af36UuQ8'
+TOKEN = '7217912729:AAEejn42bw2U9AB7SmcUYwt9tdpqvKYcJR0'
 bot = telebot.TeleBot(TOKEN)
 
 users = {}
@@ -17,10 +18,18 @@ prices = {
 
 daily_reward = 1
 
+levels_fa = {
+    'normal': 'معمولی',
+    'pro': 'حرفه‌ای',
+    'vip': 'VIP'
+}
+
 def get_main_menu(user_id):
     keyboard = InlineKeyboardMarkup()
     keyboard.add(InlineKeyboardButton("🎁 امتیاز روزانه", callback_data="daily"))
     keyboard.add(InlineKeyboardButton("💎 خرید اشتراک", callback_data="buy_sub"))
+    if user_id == admin_id:
+        keyboard.add(InlineKeyboardButton("پنل مدیریت", callback_data="admin_panel"))
     return keyboard
 
 def get_sub_menu():
@@ -80,13 +89,16 @@ def callback(call):
         cost = prices[sub]
         if users[user_id]['score'] >= cost:
             users[user_id]['score'] -= cost
-            users[user_id]['level'] = sub.upper()
-            bot.answer_callback_query(call.id, f"اشتراک {sub.upper()} فعال شد.")
+            users[user_id]['level'] = sub
+            bot.answer_callback_query(call.id, f"اشتراک {levels_fa[sub]} فعال شد.")
         else:
             bot.answer_callback_query(call.id, "امتیاز کافی ندارید.")
 
+    elif call.data == "admin_panel" and user_id == admin_id:
+        bot.edit_message_text("پنل مدیریت:", call.message.chat.id, call.message.message_id, reply_markup=get_admin_panel())
+
     elif call.data == "settings" and user_id == admin_id:
-        bot.send_message(user_id, f"مقادیر فعلی:\n\n🔹 قیمت‌ها:\nمعمولی: {prices['normal']}\nحرفه‌ای: {prices['pro']}\nVIP: {prices['vip']}\n\n🎁 امتیاز روزانه: {daily_reward}\n\nبرای تغییر قیمت بنویس:\nset normal 7\nset pro 15\nset vip 30\nset daily 2")
+        bot.send_message(user_id, f"مقادیر فعلی:\n\n🔹 قیمت‌ها:\nمعمولی: {prices['normal']}\nحرفه‌ای: {prices['pro']}\nVIP: {prices['vip']}\n\n🎁 امتیاز روزانه: {daily_reward}\n\nبرای تغییر قیمت‌ها و امتیاز روزانه، پیام را به صورت زیر ارسال کنید:\nset normal 7\nset pro 15\nset vip 30\nset daily 2")
 
     elif call.data == "broadcast" and user_id == admin_id:
         msg = bot.send_message(user_id, "پیام همگانی را بنویس:")
@@ -115,9 +127,28 @@ def watch_user_info(message):
     uid = int(message.text)
     if uid in users:
         u = users[uid]
-        bot.send_message(admin_id, f"🔍 کاربر {uid}\nامتیاز: {u['score']}\nاشتراک: {u['level']}", reply_markup=get_user_control_menu(uid))
+        bot.send_message(admin_id, f"🔍 کاربر {uid}\nامتیاز: {u['score']}\nاشتراک: {levels_fa.get(u['level'], u['level'])}", reply_markup=get_user_control_menu(uid))
     else:
         bot.send_message(admin_id, "کاربر یافت نشد.")
+
+@bot.message_handler(func=lambda m: m.from_user.id == admin_id)
+def handle_admin_text(message):
+    text = message.text.strip()
+    pattern = r'^set\s+(normal|pro|vip|daily)\s+(\d+)$'
+    match = re.match(pattern, text, re.IGNORECASE)
+    if match:
+        key = match.group(1).lower()
+        value = int(match.group(2))
+        global daily_reward
+        if key in ['normal', 'pro', 'vip']:
+            prices[key] = value
+            bot.send_message(admin_id, f"قیمت اشتراک {levels_fa[key]} به {value} امتیاز تغییر کرد.")
+        elif key == 'daily':
+            daily_reward = value
+            bot.send_message(admin_id, f"امتیاز روزانه به {value} تغییر کرد.")
+    else:
+        # میتونی اینجا دستورهای دیگه ادمین رو هم اضافه کنی
+        pass
 
 def broadcast_msg(message):
     if message.from_user.id != admin_id:
