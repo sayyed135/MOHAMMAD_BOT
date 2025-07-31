@@ -3,7 +3,7 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 import datetime
 import re
 
-TOKEN = '7217912729:AAEejn42bw2U9AB7SmcUYwt9tdpqvKYcJR0'
+TOKEN = '8483075209:AAFoH7LOI8Pl5KclHdxWenVrPV6JbfW5biM'
 bot = telebot.TeleBot(TOKEN)
 
 users = {}
@@ -62,7 +62,7 @@ def start(message):
     if user_id in blocked_users:
         return
     if user_id not in users:
-        users[user_id] = {'score': 0, 'level': 'عادی', 'last_daily': None}
+        users[user_id] = {'score': 0, 'level': 'normal', 'last_daily': None}
     bot.send_message(user_id, "به ربات خوش آمدید!", reply_markup=get_main_menu(user_id))
 
 @bot.callback_query_handler(func=lambda call: True)
@@ -146,9 +146,6 @@ def handle_admin_text(message):
         elif key == 'daily':
             daily_reward = value
             bot.send_message(admin_id, f"امتیاز روزانه به {value} تغییر کرد.")
-    else:
-        # میتونی اینجا دستورهای دیگه ادمین رو هم اضافه کنی
-        pass
 
 def broadcast_msg(message):
     if message.from_user.id != admin_id:
