@@ -1,8 +1,9 @@
 services:
   - type: web
-    name: telegram-bot
+    name: mohammad-bot-2
     env: python
-    plan: free
-    buildCommand: "pip install -r requirements.txt"
+    buildCommand: ""
     startCommand: "python main.py"
-    autoDeploy: false
+    envVars:
+      - key: PORT
+        value: 10000
