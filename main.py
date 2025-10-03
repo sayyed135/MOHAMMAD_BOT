@@ -5,8 +5,8 @@ import telebot
 from telebot import types
 import requests
 
-# توکن ربات
-TOKEN = "7961151930:AAEFlo4B0A_uWZv-17NSqQPl6-UVHFynkZQ"
+# توکن جدید ربات
+TOKEN = "7961151930:AAEMibfYlZJ6hr5Ji9k-3lMY8Hf0ZU0Dvrc"
 bot = telebot.TeleBot(TOKEN, threaded=False)
 app = Flask(__name__)
 
@@ -16,6 +16,7 @@ ADMIN_ID = 6994772164
 # دیتابیس SQLite
 DB_FILE = "data.db"
 
+# ───────────── دیتابیس ─────────────
 def init_db():
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
@@ -60,7 +61,6 @@ def start_message(message):
     btn3 = types.KeyboardButton("Support")
     markup.add(btn1, btn2, btn3)
 
-    # اگر مدیر هست، دکمه Admin Stats هم اضافه کن
     if message.chat.id == ADMIN_ID:
         btn4 = types.KeyboardButton("Admin Stats")
         markup.add(btn4)
