@@ -1,9 +1,0 @@
-services:
-  - type: web
-    name: mohammad-bot-2
-    env: python
-    buildCommand: ""
-    startCommand: "python main.py"
-    envVars:
-      - key: PORT
-        value: 10000
