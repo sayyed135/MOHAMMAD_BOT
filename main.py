@@ -1,44 +1,135 @@
-import os import sqlite3 from datetime import datetime, date from flask import Flask, request, abort import telebot from telebot import types import threading import requests
+import os
+import telebot
+from flask import Flask, request
+import sqlite3
+from datetime import datetime
 
-TOKEN = os.getenv('TOKEN', '7961151930:AAEMibfYlZJ6hr5Ji9k-3lMY8Hf0ZU0Dvrc') WEB_SERVICE_URL = os.getenv('WEB_SERVICE_URL', 'https://code-ai-0alo.onrender.com') SUPER_ADMIN_ID = int(os.getenv('SUPER_ADMIN_ID', '6994772164')) DB_PATH = os.getenv('DB_PATH', 'bot_data.db') BACKUP_DIR = os.getenv('BACKUP_DIR', 'backups')
+# ----------------- تنظیمات اصلی -----------------
+TOKEN = "7961151930:AAGiq4-yqNpMc3aZ1F1k8DpNqjHqFKmpxyY"
+WEBHOOK_URL = "https://code-ai-0alo.onrender.com"  # آدرس وب‌سرویس Render
+ADMIN_ID = 6994772164
 
-bot = telebot.TeleBot(TOKEN, threaded=False) app = Flask(name)
+# ساخت پوشه بکاپ اگر وجود نداشت
+if not os.path.exists("backups"):
+    os.makedirs("backups")
 
-def init_db(): os.makedirs(BACKUP_DIR, exist_ok=True) conn = sqlite3.connect(DB_PATH, check_same_thread=False) cur = conn.cursor() cur.execute('''CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, points_diamond INTEGER DEFAULT 0, points_gold INTEGER DEFAULT 0, points_coin INTEGER DEFAULT 0, last_daily TEXT DEFAULT NULL)''') cur.execute('''CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)''') cur.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('lang', 'en')") cur.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('service_link', ?)" , (WEB_SERVICE_URL,)) conn.commit() return conn
+DB_PATH = "bot_data.db"
 
-conn = init_db() lock = threading.Lock()
+# ----------------- دیتابیس -----------------
+def init_db():
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("""CREATE TABLE IF NOT EXISTS users (
+                    user_id INTEGER PRIMARY KEY,
+                    points INTEGER DEFAULT 0,
+                    lang TEXT DEFAULT 'en'
+                )""")
+    conn.commit()
+    conn.close()
 
-def get_setting(key): cur = conn.cursor() cur.execute('SELECT value FROM settings WHERE key=?', (key,)) r = cur.fetchone() return r[0] if r else None
+init_db()
 
-def set_setting(key, value): with lock: cur = conn.cursor() cur.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?,?)", (key, str(value))) conn.commit() backup_db()
+def get_user(user_id):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("SELECT points, lang FROM users WHERE user_id=?", (user_id,))
+    row = c.fetchone()
+    if row is None:
+        c.execute("INSERT INTO users (user_id, points, lang) VALUES (?, 0, 'en')", (user_id,))
+        conn.commit()
+        conn.close()
+        return 0, 'en'
+    conn.close()
+    return row
 
-def ensure_user(user_id): with lock: cur = conn.cursor() cur.execute('SELECT user_id FROM users WHERE user_id=?', (user_id,)) if not cur.fetchone(): cur.execute('INSERT INTO users (user_id) VALUES (?)', (user_id,)) conn.commit() backup_db()
+def update_points(user_id, amount):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("UPDATE users SET points = points + ? WHERE user_id=?", (amount, user_id))
+    conn.commit()
+    conn.close()
 
-def add_points(user_id, diamond=0, gold=0, coin=0): with lock: ensure_user(user_id) cur = conn.cursor() cur.execute('''UPDATE users SET points_diamond = points_diamond + ?, points_gold = points_gold + ?, points_coin = points_coin + ? WHERE user_id = ?''', (diamond, gold, coin, user_id)) conn.commit() backup_db()
+def set_language(user_id, lang):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("UPDATE users SET lang=? WHERE user_id=?", (lang, user_id))
+    conn.commit()
+    conn.close()
 
-def get_user_stats(user_id): cur = conn.cursor() cur.execute('SELECT points_diamond, points_gold, points_coin, last_daily FROM users WHERE user_id=?', (user_id,)) r = cur.fetchone() if not r: return (0,0,0,None) return r
+# ----------------- ربات -----------------
+bot = telebot.TeleBot(TOKEN)
+app = Flask(__name__)
 
-def set_last_daily(user_id, iso_date): with lock: cur = conn.cursor() cur.execute('UPDATE users SET last_daily=? WHERE user_id=?', (iso_date, user_id)) conn.commit() backup_db()
+# پیام شروع
+@bot.message_handler(commands=['start'])
+def start_cmd(message):
+    user_id = message.from_user.id
+    points, lang = get_user(user_id)
+    if lang == 'fa':
+        markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
+        markup.add("پشتیبانی", "امتیاز روزانه")
+        bot.send_message(user_id, "سلام! خوش آمدی 🌹", reply_markup=markup)
+    else:
+        markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
+        markup.add("Support", "Daily Points")
+        bot.send_message(user_id, "Welcome! 👋", reply_markup=markup)
 
-def backup_db(): try: ts = datetime.utcnow().strftime('%Y%m%d%H%M%S') backup_file = os.path.join(BACKUP_DIR, f'bot_data_{ts}.db') with open(DB_PATH, 'rb') as src, open(backup_file, 'wb') as dst: dst.write(src.read()) try: files = {'file': open(backup_file, 'rb')} requests.post(WEB_SERVICE_URL.rstrip('/') + '/backup', files=files, timeout=5) except Exception: pass except Exception: pass
+# دکمه‌ها
+@bot.message_handler(func=lambda m: True)
+def handle_buttons(message):
+    user_id = message.from_user.id
+    points, lang = get_user(user_id)
 
-TEXTS = { 'en': {'welcome': "Welcome!", 'support': "For support contact: {}", 'daily_already': "You've already taken today's daily point.", 'daily_success': "You received 1 coin for today's check-in!", 'admin_only': "This is an admin-only command.", 'language_changed': "Bot language changed to {}.", 'stats_title': "Statistics", 'service_link': "Service link: {}", 'language_button': "Language", 'admin_panel': "Admin Panel"}, 'fa': {'welcome': "خوش آمدید!", 'support': "برای پشتیبانی تماس بگیرید: {}", 'daily_already': "امروز قبلا امتیاز روزانه را گرفتید.", 'daily_success': "شما ۱ سکه بابت امتیاز روزانه دریافت کردید!", 'admin_only': "این دستور فقط برای مدیر است.", 'language_changed': "زبان ربات به {} تغییر کرد.", 'stats_title': "آمار", 'service_link': "لینک سرویس: {}", 'language_button': "Language", 'admin_panel': "پنل مدیریت"} }
+    if message.text in ["امتیاز روزانه", "Daily Points"]:
+        update_points(user_id, 1)
+        points, lang = get_user(user_id)
+        if lang == 'fa':
+            bot.send_message(user_id, f"✅ یک امتیاز اضافه شد. امتیاز فعلی: {points}")
+        else:
+            bot.send_message(user_id, f"✅ One point added. Current points: {points}")
 
-def t(key): lang = get_setting('lang') or 'en' return TEXTS.get(lang, TEXTS['en']).get(key, key)
+    elif message.text in ["پشتیبانی", "Support"]:
+        if lang == 'fa':
+            bot.send_message(user_id, "📩 برای پشتیبانی با مدیر در تماس باشید.")
+        else:
+            bot.send_message(user_id, "📩 Contact admin for support.")
 
-def user_keyboard(): kb = types.InlineKeyboardMarkup() kb.add(types.InlineKeyboardButton('Support', callback_data='support')) kb.add(types.InlineKeyboardButton('Daily Points', callback_data='daily')) return kb
+    elif message.text == "Language":
+        markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
+        markup.add("فارسی", "English")
+        bot.send_message(user_id, "Select Language:", reply_markup=markup)
 
-@bot.message_handler(commands=['start']) def handle_start(m): user_id = m.from_user.id ensure_user(user_id) bot.send_message(user_id, t('welcome'), reply_markup=user_keyboard())
+    elif message.text == "فارسی":
+        set_language(user_id, 'fa')
+        bot.send_message(user_id, "✅ زبان روی فارسی تنظیم شد.")
 
-@bot.message_handler(commands=['admin']) def handle_admin(m): user_id = m.from_user.id if user_id != SUPER_ADMIN_ID: bot.send_message(user_id, t('admin_only')) return kb = types.InlineKeyboardMarkup() kb.add(types.InlineKeyboardButton(t('stats_title'), callback_data='admin_stats')) kb.add(types.InlineKeyboardButton(t('language_button'), callback_data='admin_language')) bot.send_message(user_id, t('admin_panel'), reply_markup=kb)
+    elif message.text == "English":
+        set_language(user_id, 'en')
+        bot.send_message(user_id, "✅ Language set to English.")
 
-@bot.callback_query_handler(func=lambda call: True) def callback_query(call): user_id = call.from_user.id data = call.data if data == 'support': link = get_setting('service_link') or WEB_SERVICE_URL bot.answer_callback_query(call.id) bot.send_message(user_id, t('support').format(link)) elif data == 'daily': ensure_user(user_id) pd, pg, pc, last_daily = get_user_stats(user_id) today_iso = date.today().isoformat() if last_daily == today_iso: bot.answer_callback_query(call.id, text=t('daily_already')) return add_points(user_id, diamond=0, gold=0, coin=1) set_last_daily(user_id, today_iso) bot.answer_callback_query(call.id, text=t('daily_success')) elif data == 'admin_stats' and user_id == SUPER_ADMIN_ID: cur = conn.cursor() cur.execute('SELECT COUNT(*), SUM(points_diamond), SUM(points_gold), SUM(points_coin) FROM users') r = cur.fetchone() total_users = r[0] or 0 sum_d = r[1] or 0 sum_g = r[2] or 0 sum_c = r[3] or 0 service_link = get_setting('service_link') text = f"{t('stats_title')}:\n\nUsers: {total_users}\nDiamonds: {sum_d}\nGolds: {sum_g}\nCoins: {sum_c}\n\n{t('service_link').format(service_link)}" bot.answer_callback_query(call.id) bot.send_message(user_id, text) elif data == 'admin_language' and user_id == SUPER_ADMIN_ID: kb = types.InlineKeyboardMarkup() kb.add(types.InlineKeyboardButton('فارسی', callback_data='set_lang_fa')) kb.add(types.InlineKeyboardButton('English', callback_data='set_lang_en')) bot.answer_callback_query(call.id) bot.send_message(user_id, 'Choose language / زبان را انتخاب کنید:', reply_markup=kb) elif data in ['set_lang_fa', 'set_lang_en'] and user_id == SUPER_ADMIN_ID: new_lang = 'fa' if data == 'set_lang_fa' else 'en' set_setting('lang', new_lang) bot.answer_callback_query(call.id, text=TEXTS[new_lang]['language_changed'].format('فارسی' if new_lang=='fa' else 'English'))
+    elif message.text == "آمار" and user_id == ADMIN_ID:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute("SELECT COUNT(*), SUM(points) FROM users")
+        total_users, total_points = c.fetchone()
+        conn.close()
+        bot.send_message(user_id, f"👥 Users: {total_users}\n⭐ Total Points: {total_points if total_points else 0}")
 
-@app.route('/' + TOKEN, methods=['POST']) def webhook(): if request.headers.get('content-type') == 'application/json': json_str = request.get_data().decode('utf-8') update = telebot.types.Update.de_json(json_str) bot.process_new_updates([update]) return '', 200 else: abort(403)
+# ----------------- وبهوک -----------------
+@app.route(f"/{TOKEN}", methods=["POST"])
+def webhook():
+    json_str = request.get_data().decode("utf-8")
+    update = telebot.types.Update.de_json(json_str)
+    bot.process_new_updates([update])
+    return "OK", 200
 
-@app.route('/') def index(): return 'Bot is running.'
+@app.route("/", methods=["GET"])
+def index():
+    return "Bot is running!", 200
 
-def set_webhook(): url = WEB_SERVICE_URL.rstrip('/') + '/' + TOKEN bot.remove_webhook() bot.set_webhook(url=url)
-
-if name == 'main': try: set_webhook() except: pass app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
-
+if __name__ == "__main__":
+    import threading
+    bot.remove_webhook()
+    bot.set_webhook(url=f"{WEBHOOK_URL}/{TOKEN}")
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
