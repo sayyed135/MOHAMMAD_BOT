@@ -1,135 +1,84 @@
-import os
-import telebot
-from flask import Flask, request
-import sqlite3
-from datetime import datetime
+from telegram import (
+    Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
+)
+from telegram.ext import (
+    Application, CommandHandler, MessageHandler, filters, CallbackContext, CallbackQueryHandler
+)
 
-# ----------------- تنظیمات اصلی -----------------
+# توکن و آیدی مدیر
 TOKEN = "7961151930:AAGiq4-yqNpMc3aZ1F1k8DpNqjHqFKmpxyY"
-WEBHOOK_URL = "https://code-ai-0alo.onrender.com"  # آدرس وب‌سرویس Render
-ADMIN_ID = 6994772164
+ADMIN_ID = 6994772164  # آیدی عددی تو
 
-# ساخت پوشه بکاپ اگر وجود نداشت
-if not os.path.exists("backups"):
-    os.makedirs("backups")
+# دیتای کاربران
+users = {}
 
-DB_PATH = "bot_data.db"
+# /start
+async def start(update: Update, context: CallbackContext):
+    keyboard = [
+        [KeyboardButton("Verify Identity", request_contact=True)]
+    ]
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
+    await update.message.reply_text("Welcome! Please verify your identity.", reply_markup=reply_markup)
 
-# ----------------- دیتابیس -----------------
-def init_db():
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("""CREATE TABLE IF NOT EXISTS users (
-                    user_id INTEGER PRIMARY KEY,
-                    points INTEGER DEFAULT 0,
-                    lang TEXT DEFAULT 'en'
-                )""")
-    conn.commit()
-    conn.close()
+# گرفتن شماره تلفن
+async def contact_handler(update: Update, context: CallbackContext):
+    user = update.message.from_user
+    phone = update.message.contact.phone_number
+    users[user.id] = {
+        "name": user.first_name,
+        "phone": phone,
+        "points": users.get(user.id, {}).get("points", 0)
+    }
+    await update.message.reply_text("✅ Your identity has been verified!")
 
-init_db()
-
-def get_user(user_id):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("SELECT points, lang FROM users WHERE user_id=?", (user_id,))
-    row = c.fetchone()
-    if row is None:
-        c.execute("INSERT INTO users (user_id, points, lang) VALUES (?, 0, 'en')", (user_id,))
-        conn.commit()
-        conn.close()
-        return 0, 'en'
-    conn.close()
-    return row
-
-def update_points(user_id, amount):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("UPDATE users SET points = points + ? WHERE user_id=?", (amount, user_id))
-    conn.commit()
-    conn.close()
-
-def set_language(user_id, lang):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("UPDATE users SET lang=? WHERE user_id=?", (lang, user_id))
-    conn.commit()
-    conn.close()
-
-# ----------------- ربات -----------------
-bot = telebot.TeleBot(TOKEN)
-app = Flask(__name__)
-
-# پیام شروع
-@bot.message_handler(commands=['start'])
-def start_cmd(message):
-    user_id = message.from_user.id
-    points, lang = get_user(user_id)
-    if lang == 'fa':
-        markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
-        markup.add("پشتیبانی", "امتیاز روزانه")
-        bot.send_message(user_id, "سلام! خوش آمدی 🌹", reply_markup=markup)
+# دکمه مدیریت
+async def management(update: Update, context: CallbackContext):
+    if update.message.from_user.id == ADMIN_ID:
+        if not users:
+            await update.message.reply_text("No users registered yet.")
+            return
+        text = "📊 Users Stats:\n\n"
+        for uid, info in users.items():
+            text += f"👤 ID: {uid}\n📞 Phone: {info['phone']}\n⭐ Points: {info['points']}\n\n"
+        await update.message.reply_text(text)
     else:
-        markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
-        markup.add("Support", "Daily Points")
-        bot.send_message(user_id, "Welcome! 👋", reply_markup=markup)
+        await update.message.reply_text("⛔ You are not authorized!")
 
-# دکمه‌ها
-@bot.message_handler(func=lambda m: True)
-def handle_buttons(message):
-    user_id = message.from_user.id
-    points, lang = get_user(user_id)
+# پاسخ به پیام خاص
+async def message_handler(update: Update, context: CallbackContext):
+    text = update.message.text
+    if text == "علی خوبی":
+        await update.message.reply_text("خوبم داداش، تو چطوری؟ 😊")
 
-    if message.text in ["امتیاز روزانه", "Daily Points"]:
-        update_points(user_id, 1)
-        points, lang = get_user(user_id)
-        if lang == 'fa':
-            bot.send_message(user_id, f"✅ یک امتیاز اضافه شد. امتیاز فعلی: {points}")
-        else:
-            bot.send_message(user_id, f"✅ One point added. Current points: {points}")
+# دستور برای مدیر
+async def admin_panel(update: Update, context: CallbackContext):
+    if update.message.from_user.id == ADMIN_ID:
+        keyboard = [[InlineKeyboardButton("📊 MANAGEMENT", callback_data="management")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await update.message.reply_text("Admin Panel:", reply_markup=reply_markup)
 
-    elif message.text in ["پشتیبانی", "Support"]:
-        if lang == 'fa':
-            bot.send_message(user_id, "📩 برای پشتیبانی با مدیر در تماس باشید.")
-        else:
-            bot.send_message(user_id, "📩 Contact admin for support.")
+# کلیک روی دکمه مدیریت
+async def button_handler(update: Update, context: CallbackContext):
+    query = update.callback_query
+    await query.answer()
+    if query.data == "management":
+        if not users:
+            await query.edit_message_text("No users registered yet.")
+            return
+        text = "📊 Users Stats:\n\n"
+        for uid, info in users.items():
+            text += f"👤 ID: {uid}\n📞 Phone: {info['phone']}\n⭐ Points: {info['points']}\n\n"
+        await query.edit_message_text(text)
 
-    elif message.text == "Language":
-        markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
-        markup.add("فارسی", "English")
-        bot.send_message(user_id, "Select Language:", reply_markup=markup)
+def main():
+    app = Application.builder().token(TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("admin", admin_panel))
+    app.add_handler(MessageHandler(filters.CONTACT, contact_handler))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
+    app.add_handler(CallbackQueryHandler(button_handler))
 
-    elif message.text == "فارسی":
-        set_language(user_id, 'fa')
-        bot.send_message(user_id, "✅ زبان روی فارسی تنظیم شد.")
-
-    elif message.text == "English":
-        set_language(user_id, 'en')
-        bot.send_message(user_id, "✅ Language set to English.")
-
-    elif message.text == "آمار" and user_id == ADMIN_ID:
-        conn = sqlite3.connect(DB_PATH)
-        c = conn.cursor()
-        c.execute("SELECT COUNT(*), SUM(points) FROM users")
-        total_users, total_points = c.fetchone()
-        conn.close()
-        bot.send_message(user_id, f"👥 Users: {total_users}\n⭐ Total Points: {total_points if total_points else 0}")
-
-# ----------------- وبهوک -----------------
-@app.route(f"/{TOKEN}", methods=["POST"])
-def webhook():
-    json_str = request.get_data().decode("utf-8")
-    update = telebot.types.Update.de_json(json_str)
-    bot.process_new_updates([update])
-    return "OK", 200
-
-@app.route("/", methods=["GET"])
-def index():
-    return "Bot is running!", 200
+    app.run_polling()
 
 if __name__ == "__main__":
-    import threading
-    bot.remove_webhook()
-    bot.set_webhook(url=f"{WEBHOOK_URL}/{TOKEN}")
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+    main()
