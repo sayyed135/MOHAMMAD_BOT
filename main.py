@@ -1,177 +1,104 @@
+# app.py
+from flask import Flask, request, jsonify
+import telebot
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 import json
 import os
-from datetime import datetime, timedelta
-from telegram import (
-    Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
-)
-from telegram.ext import (
-    Application, CommandHandler, MessageHandler, filters, CallbackContext, CallbackQueryHandler
-)
 
-TOKEN = "7961151930:AAGiq4-yqNpMc3aZ1F1k8DpNqjHqFKmpxyY"
-ADMIN_ID = 6994772164
-DATA_FILE = "data.json"
+# ====== تنظیمات توکن ======
+TELEGRAM_TOKEN = "7961151930:AAEM2r0BhaOp99eZtuL5BRQQYZc9335YHRs"
+# ========================
 
-# بارگذاری داده‌ها
-if os.path.exists(DATA_FILE):
-    with open(DATA_FILE, "r", encoding="utf-8") as f:
-        data = json.load(f)
+bot = telebot.TeleBot(TELEGRAM_TOKEN)
+app = Flask(__name__)
+
+# ====== ثابت ======
+WEEKLY_PASSWORD = "A"  # رمز ثابت یک حرف
+HELP_LINK = "https://t.me/mohammadsadat_afg"
+USERS_FILE = "users.json"
+
+# ====== دیتای کاربران ======
+if os.path.exists(USERS_FILE):
+    with open(USERS_FILE, "r", encoding="utf-8") as f:
+        user_data = json.load(f)
 else:
-    data = {"users": {}, "settings": {"language": "EN", "daily_points": 1, "daily_time": 24}}
+    user_data = {}  # {chat_id: {"name": "", "number": "", "verified": False}}
 
-# ذخیره داده‌ها
-def save_data():
-    with open(DATA_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=4, ensure_ascii=False)
+# ====== توابع ذخیره و بارگذاری ======
+def save_users():
+    with open(USERS_FILE, "w", encoding="utf-8") as f:
+        json.dump(user_data, f, ensure_ascii=False, indent=4)
 
-# ساخت کیبورد کاربر
-def user_keyboard():
-    kb = [
-        [KeyboardButton("Verify Identity", request_contact=True)],
-        ["Daily Points", "Support"],
-        ["Subscription", "Guide"]
-    ]
-    return ReplyKeyboardMarkup(kb, resize_keyboard=True)
+# ====== استارت و گرفتن اسم ======
+@bot.message_handler(commands=['start'])
+def start(message):
+    chat_id = str(message.chat.id)
+    user_data[chat_id] = {"name": "", "number": "", "verified": False}
+    save_users()
+    markup = InlineKeyboardMarkup()
+    markup.add(InlineKeyboardButton("ارسال اسم", callback_data="ask_name"))
+    bot.send_message(chat_id, "سلام! لطفاً اسم خود را وارد کنید:", reply_markup=markup)
 
-# /start
-async def start(update: Update, context: CallbackContext):
-    await update.message.reply_text(
-        "Welcome! Please choose an option.", reply_markup=user_keyboard()
-    )
+# ====== هندل دکمه‌ها ======
+@bot.callback_query_handler(func=lambda call: True)
+def callback_handler(call):
+    chat_id = str(call.message.chat.id)
 
-# گرفتن شماره تلفن
-async def contact_handler(update: Update, context: CallbackContext):
-    user = update.message.from_user
-    phone = update.message.contact.phone_number
-    if str(user.id) not in data["users"]:
-        data["users"][str(user.id)] = {
-            "name": user.first_name,
-            "phone": phone,
-            "points": 0,
-            "subscription": None,
-            "referrals": [],
-            "last_daily": None
-        }
+    if call.data == "ask_name":
+        msg = bot.send_message(chat_id, "اسم خود را تایپ کنید:")
+        bot.register_next_step_handler(msg, get_name)
+
+    elif call.data == "ask_number":
+        msg = bot.send_message(chat_id, "شماره خود را تایپ کنید:")
+        bot.register_next_step_handler(msg, get_number)
+
+    elif call.data == "ask_password":
+        msg = bot.send_message(chat_id, "رمز هفتگی خود را وارد کنید:")
+        bot.register_next_step_handler(msg, check_password)
+
+    elif call.data == "help":
+        bot.send_message(chat_id, f"برای کمک روی لینک زیر کلیک کنید:\n{HELP_LINK}")
+
+# ====== گرفتن اسم ======
+def get_name(message):
+    chat_id = str(message.chat.id)
+    user_data[chat_id]["name"] = message.text
+    save_users()
+    markup = InlineKeyboardMarkup()
+    markup.add(InlineKeyboardButton("ارسال شماره", callback_data="ask_number"))
+    bot.send_message(chat_id, f"اسم شما ثبت شد: {message.text}", reply_markup=markup)
+
+# ====== گرفتن شماره ======
+def get_number(message):
+    chat_id = str(message.chat.id)
+    user_data[chat_id]["number"] = message.text
+    save_users()
+    markup = InlineKeyboardMarkup()
+    markup.add(InlineKeyboardButton("تایید رمز هفتگی", callback_data="ask_password"))
+    bot.send_message(chat_id, f"شماره شما ثبت شد: {message.text}", reply_markup=markup)
+
+# ====== چک کردن رمز ======
+def check_password(message):
+    chat_id = str(message.chat.id)
+    if message.text == WEEKLY_PASSWORD:
+        user_data[chat_id]["verified"] = True
+        save_users()
+        bot.send_message(chat_id, "رمز صحیح است! شما تایید شدید ✅")
     else:
-        data["users"][str(user.id)]["phone"] = phone
-    save_data()
-    await update.message.reply_text("✅ Your identity has been verified!")
+        markup = InlineKeyboardMarkup()
+        markup.add(InlineKeyboardButton("کمک", callback_data="help"))
+        bot.send_message(chat_id, "رمز اشتباه است ❌", reply_markup=markup)
 
-# Daily Points
-async def daily_points(update: Update, context: CallbackContext):
-    uid = str(update.message.from_user.id)
-    if uid not in data["users"]:
-        await update.message.reply_text("❌ You must verify first.")
-        return
-    last = data["users"][uid].get("last_daily")
-    now = datetime.now()
-    allowed_time = timedelta(hours=data["settings"]["daily_time"])
-    if last:
-        last_time = datetime.fromisoformat(last)
-        if now - last_time < allowed_time:
-            await update.message.reply_text("⏳ You have already claimed your daily points.")
-            return
-    data["users"][uid]["points"] += data["settings"]["daily_points"]
-    data["users"][uid]["last_daily"] = now.isoformat()
-    save_data()
-    await update.message.reply_text(f"✅ You received {data['settings']['daily_points']} points!")
+# ====== وب‌هوک ======
+@app.route("/webhook", methods=['POST'])
+def webhook():
+    json_data = request.get_json()
+    if json_data:
+        bot.process_new_updates([telebot.types.Update.de_json(json_data)])
+    return jsonify({"status": "ok"})
 
-# Support
-async def support(update: Update, context: CallbackContext):
-    uid = str(update.message.from_user.id)
-    if uid not in data["users"]:
-        await update.message.reply_text("❌ Verify first.")
-        return
-    await update.message.reply_text("✉️ Send your message, it will be forwarded to admin.")
-    context.user_data["support"] = True
-
-async def support_message(update: Update, context: CallbackContext):
-    uid = str(update.message.from_user.id)
-    if context.user_data.get("support"):
-        text = update.message.text
-        await context.bot.send_message(
-            chat_id=ADMIN_ID,
-            text=f"📩 Support Message from {data['users'][uid]['name']} (ID: {uid}):\n{text}"
-        )
-        # دکمه قطع ارتباط
-        kb = InlineKeyboardMarkup([[InlineKeyboardButton("Disconnect", callback_data=f"disconnect_{uid}")]])
-        await context.bot.send_message(chat_id=ADMIN_ID, text="Manage this support chat:", reply_markup=kb)
-        await update.message.reply_text("✅ Your message sent to admin.")
-        context.user_data["support"] = False
-
-# پنل مدیر
-async def admin_panel(update: Update, context: CallbackContext):
-    if update.message.from_user.id != ADMIN_ID:
-        await update.message.reply_text("⛔ You are not authorized!")
-        return
-    kb = [
-        [InlineKeyboardButton("📊 MANAGEMENT", callback_data="management")],
-        [InlineKeyboardButton("🛠 Settings", callback_data="settings")]
-    ]
-    await update.message.reply_text("🔐 Admin Panel:", reply_markup=InlineKeyboardMarkup(kb))
-
-# دکمه‌ها
-async def button_handler(update: Update, context: CallbackContext):
-    query = update.callback_query
-    await query.answer()
-    data_id = query.data
-
-    # مدیریت کاربران
-    if data_id == "management":
-        text = "📊 Users Stats:\n\n"
-        for uid, info in data["users"].items():
-            text += f"👤 ID: {uid}\n📞 Phone: {info['phone']}\n⭐ Points: {info['points']}\n🔹 Subs: {len(info['referrals'])}\nSubscription: {info['subscription']}\n\n"
-        await query.edit_message_text(text)
-
-    # Settings
-    elif data_id == "settings":
-        kb = [
-            [InlineKeyboardButton("Language: EN/FA", callback_data="toggle_language")],
-            [InlineKeyboardButton("Set Daily Points", callback_data="set_daily_points")]
-        ]
-        await query.edit_message_text("⚙️ Admin Settings:", reply_markup=InlineKeyboardMarkup(kb))
-
-    elif data_id == "toggle_language":
-        current = data["settings"]["language"]
-        data["settings"]["language"] = "FA" if current == "EN" else "EN"
-        save_data()
-        await query.edit_message_text(f"Language switched to {data['settings']['language']}")
-
-# پیام راهنما
-async def guide(update: Update, context: CallbackContext):
-    msg = (
-        "📘 Guide / راهنما\n\n"
-        "1. Verify Identity: Send your contact.\n"
-        "2. Daily Points: Claim your daily points.\n"
-        "3. Support: Send messages to admin.\n"
-        "4. Subscription: Get benefits with referrals.\n"
-        "5. Transfer points to others (future).\n\n"
-        "🎯 Full guide will be expanded here for English & Persian..."
-    )
-    await update.message.reply_text(msg)
-
-# پیام‌های متنی
-async def text_handler(update: Update, context: CallbackContext):
-    if context.user_data.get("support"):
-        await support_message(update, context)
-    elif update.message.text == "Daily Points":
-        await daily_points(update, context)
-    elif update.message.text == "Support":
-        await support(update, context)
-    elif update.message.text == "Subscription":
-        await update.message.reply_text("⚡ Subscription system coming soon...")
-    elif update.message.text == "Guide":
-        await guide(update, context)
-
-def main():
-    app = Application.builder().token(TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("admin", admin_panel))
-    app.add_handler(MessageHandler(filters.CONTACT, contact_handler))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
-    app.add_handler(CallbackQueryHandler(button_handler))
-
-    app.run_polling()
-
+# ====== اجرا ======
 if __name__ == "__main__":
-    main()
+    bot.remove_webhook()
+    bot.set_webhook(url="https://code-ai-0alo.onrender.com/webhook")
+    app.run(host="0.0.0.0", port=10000)
