@@ -1,87 +1,144 @@
 # main.py
-from flask import Flask, request, jsonify
-import telebot
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-import json
+from telebot import TeleBot, types
+from flask import Flask, request
 from datetime import datetime, timedelta
+import threading
 
-TELEGRAM_TOKEN = "7961151930:AAEM2r0BhaOp99eZtuL5BRQQYZc9335YHRs"
+TOKEN = "7961151930:AAEM2r0BhaOp99eZtuL5BRQQYZc9335YHRs"
 ADMIN_ID = 6994772164
-WEBHOOK_URL = "https://code-ai-0alo.onrender.com/webhook"
+WEBHOOK_URL = "https://code-ai-0alo.onrender.com/" + TOKEN
 
-bot = telebot.TeleBot(TELEGRAM_TOKEN)
+bot = TeleBot(TOKEN)
 app = Flask(__name__)
 
-# داده‌های کاربران در حافظه
-try:
-    with open("users.json", "r") as f:
-        users = json.load(f)
-except:
-    users = {}
+# ---- حافظه داخلی ----
+users = {}  # {user_id: {"name":..., "phone":..., "weekly_pass":..., "points":..., "subscription":..., "referrals":...}}
+weekly_pass = "CODEAI2025"
+current_version = "1.0"
+user_buttons = {}  # {button_id: {"name":..., "message":..., "points":..., "expiry":...}}
 
-# تابع ذخیره‌سازی داده‌ها
-def save_users():
-    with open("users.json", "w") as f:
-        json.dump(users, f)
+# ---- کمکی ----
+def check_user(user_id):
+    if user_id not in users:
+        return False
+    if users[user_id].get("verified_weekly") != weekly_pass:
+        return False
+    return True
 
-# مرحله بعد ثبت نام
-def ask_name(message):
-    users[str(message.chat.id)] = {"step": "name"}
-    save_users()
-    bot.send_message(message.chat.id, "سلام! لطفاً اسمت رو وارد کن:")
+def add_points(user_id, points):
+    if user_id in users:
+        users[user_id]["points"] += points
 
-@bot.message_handler(func=lambda m: str(m.chat.id) not in users)
-def start_user(message):
-    ask_name(message)
+# ---- استارت و ثبت نام ----
+@bot.message_handler(commands=['start'])
+def start(message):
+    user_id = message.from_user.id
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.add(types.KeyboardButton("شروع ثبت نام"))
+    bot.send_message(user_id, "سلام! برای استفاده از ربات ابتدا ثبت نام کنید.", reply_markup=markup)
 
-@bot.message_handler(func=lambda m: str(m.chat.id) in users)
-def handle_user(message):
-    uid = str(message.chat.id)
-    user = users[uid]
-    step = user.get("step", "name")
-    
-    print(f"[LOG] کاربر {uid} در مرحله {step} پیام فرستاد: {message.text}")
+@bot.message_handler(func=lambda m: m.text == "شروع ثبت نام")
+def register_name(message):
+    user_id = message.from_user.id
+    msg = bot.send_message(user_id, "لطفاً اسم خود را وارد کنید:")
+    bot.register_next_step_handler(msg, get_name)
 
-    if step == "name":
-        user["name"] = message.text
-        user["step"] = "phone"
-        save_users()
-        # دکمه شیشه‌ای ارسال شماره
-        markup = InlineKeyboardMarkup()
-        markup.add(InlineKeyboardButton("ارسال شماره من", callback_data="send_phone"))
-        bot.send_message(uid, "لطفاً شماره‌ت رو ارسال کن:", reply_markup=markup)
+def get_name(message):
+    user_id = message.from_user.id
+    name = message.text
+    users[user_id] = {"name": name, "points": 0, "subscription": "اشتراک یک", "referrals": 0}
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    markup.add(types.KeyboardButton("ارسال شماره 📱", request_contact=True))
+    bot.send_message(user_id, "حالا شماره خود را ارسال کنید:", reply_markup=markup)
 
-    elif step == "weekly":
-        if message.text == user.get("weekly_pass"):
-            bot.send_message(uid, "رمز صحیح است! خوش آمدی.")
-            user["step"] = "done"
-            save_users()
+@bot.message_handler(content_types=['contact'])
+def get_phone(message):
+    user_id = message.from_user.id
+    if message.contact is not None:
+        users[user_id]["phone"] = message.contact.phone_number
+        users[user_id]["verified_weekly"] = None
+        bot.send_message(user_id, "شماره شما ثبت شد. لطفاً رمز هفتگی را وارد کنید:")
+
+@bot.message_handler(func=lambda m: True)
+def check_weekly_pass(message):
+    user_id = message.from_user.id
+    if user_id in users and users[user_id].get("verified_weekly") != weekly_pass:
+        if message.text == weekly_pass:
+            users[user_id]["verified_weekly"] = weekly_pass
+            bot.send_message(user_id, "رمز هفتگی درست است. حالا می‌توانید از ربات استفاده کنید.")
         else:
-            markup = InlineKeyboardMarkup()
-            markup.add(InlineKeyboardButton("کمک", url="https://t.me/mohammadsadat_afg"))
-            bot.send_message(uid, "رمز اشتباه است! برای کمک اینجا کلیک کن:", reply_markup=markup)
+            markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+            markup.add(types.KeyboardButton("کمک"))
+            bot.send_message(user_id, "رمز اشتباه است! لطفاً رمز درست را وارد کنید.", reply_markup=markup)
+        return
+    # اینجا می‌تونی قابلیت‌های اصلی ربات اضافه بشه
+    bot.send_message(user_id, "سلام! شما هم اکنون دسترسی دارید.")
 
-# دریافت شماره
-@bot.callback_query_handler(func=lambda call: call.data == "send_phone")
-def send_phone(call):
-    uid = str(call.message.chat.id)
-    user = users[uid]
-    user["phone"] = call.message.contact.phone_number if call.message.contact else "شماره ثبت نشده"
-    user["step"] = "weekly"
-    user["weekly_pass"] = "1234"  # رمز هفتگی ثابت برای مثال
-    save_users()
-    bot.send_message(uid, "شماره دریافت شد. حالا لطفاً رمز هفتگی خود را وارد کنید:")
+# ---- دکمه امتیاز روزانه ----
+@bot.message_handler(func=lambda m: m.text == "امتیاز روزانه")
+def daily_points(message):
+    user_id = message.from_user.id
+    if not check_user(user_id):
+        bot.send_message(user_id, "لطفاً ابتدا رمز هفتگی را وارد کنید.")
+        return
+    today = datetime.now().date()
+    last_claim = users[user_id].get("last_daily")
+    if last_claim == today:
+        bot.send_message(user_id, "امتیاز امروز را قبلاً دریافت کرده‌اید.")
+    else:
+        points = 2 if users[user_id]["subscription"] == "اشتراک یک" else 4 if users[user_id]["subscription"] == "اشتراک دو" else 5
+        add_points(user_id, points)
+        users[user_id]["last_daily"] = today
+        bot.send_message(user_id, f"امتیاز امروز اضافه شد: {points} امتیاز. کل امتیاز شما: {users[user_id]['points']}")
 
-# وب‌هوک
-@app.route("/webhook", methods=["POST"])
+# ---- رفرال ----
+@bot.message_handler(func=lambda m: m.text == "رفرال من")
+def referral(message):
+    user_id = message.from_user.id
+    bot.send_message(user_id, f"لینک رفرال شما: https://t.me/CODE_AI_BOT?start={user_id}")
+
+# ---- حساب کاربری ----
+@bot.message_handler(func=lambda m: m.text == "حساب من")
+def my_account(message):
+    user_id = message.from_user.id
+    if not check_user(user_id):
+        bot.send_message(user_id, "لطفاً ابتدا رمز هفتگی را وارد کنید.")
+        return
+    u = users[user_id]
+    bot.send_message(user_id, f"اسم: {u['name']}\nامتیاز: {u['points']}\nاشتراک: {u['subscription']}")
+
+# ---- مدیریت ----
+@bot.message_handler(commands=['admin'])
+def admin_panel(message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.add("آمار کاربران")
+    markup.add("افزودن دکمه جدید")
+    bot.send_message(ADMIN_ID, "پنل مدیریت:", reply_markup=markup)
+
+@bot.message_handler(func=lambda m: m.text == "آمار کاربران")
+def stats(message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    active_users = sum(1 for u in users.values() if u.get("verified_weekly") == weekly_pass)
+    total_users = len(users)
+    total_points = sum(u["points"] for u in users.values())
+    bot.send_message(ADMIN_ID, f"کاربران فعال: {active_users}\nکل کاربران: {total_users}\nمجموع امتیازها: {total_points}")
+
+# ---- وب هوک ----
+@app.route(f"/{TOKEN}", methods=["POST"])
 def webhook():
-    json_data = request.get_json()
-    if json_data:
-        update = telebot.types.Update.de_json(json_data)
-        bot.process_new_updates([update])
-    return jsonify({"status": "ok"})
+    json_str = request.get_data().decode("utf-8")
+    update = types.Update.de_json(json_str)
+    bot.process_new_updates([update])
+    return "!", 200
 
-if __name__ == "__main__":
+def set_webhook():
     bot.remove_webhook()
     bot.set_webhook(url=WEBHOOK_URL)
+
+# ---- سرور ----
+if __name__ == "__main__":
+    set_webhook()
     app.run(host="0.0.0.0", port=10000)
