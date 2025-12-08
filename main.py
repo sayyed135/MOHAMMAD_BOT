@@ -13,18 +13,18 @@ bot = telebot.TeleBot(TOKEN, threaded=False)
 app = Flask(__name__)
 
 # ------------------- داده‌ها -------------------
-accounts = {}  # user_id: {"name":..., "phone":..., "diamond":0,"gold":0,"coin":0,"last_bonus":None,"history":[]}
+accounts = {}  # user_id: {"name":..., "phone":..., "coin":0,"last_bonus":None,"history":[],"bots":[]}
 pending_action = {}
 DATA_FILE = "accounts.json"
 
 def save_data():
-    with open(DATA_FILE, "w") as f:
-        json.dump(accounts, f)
+    with open(DATA_FILE, "w", encoding="utf-8") as f:
+        json.dump(accounts, f, ensure_ascii=False, indent=2)
 
 def load_data():
     global accounts
     try:
-        with open(DATA_FILE, "r") as f:
+        with open(DATA_FILE, "r", encoding="utf-8") as f:
             accounts.update(json.load(f))
     except:
         accounts.clear()
@@ -34,32 +34,34 @@ load_data()
 # ------------------- دکمه‌ها -------------------
 def get_main_keyboard(user_id):
     markup = ReplyKeyboardMarkup(resize_keyboard=True)
-    if user_id in accounts and "phone" in accounts[user_id]:
-        markup.add("پنل من")
+    if user_id == ADMIN_ID:
+        markup.add("🛠 پنل مدیریت")
+    elif user_id in accounts and "phone" in accounts[user_id]:
+        markup.add("👤 پنل من")
     else:
-        markup.add("اکانت")
-        markup.add(KeyboardButton("ارسال شماره", request_contact=True))
+        markup.add("👤 اکانت")
+        markup.add(KeyboardButton("📲 ارسال شماره", request_contact=True))
     return markup
 
 def get_user_panel():
     markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton("📊 مشاهده امتیاز", callback_data="view_score"))
-    markup.add(InlineKeyboardButton("💰 دریافت امتیاز روزانه", callback_data="daily_bonus"))
-    markup.add(InlineKeyboardButton("📞 تغییر شماره", callback_data="change_phone"))
+    markup.add(InlineKeyboardButton("💰 مشاهده امتیاز", callback_data="view_score"))
+    markup.add(InlineKeyboardButton("🎁 دریافت امتیاز روزانه", callback_data="daily_bonus"))
     markup.add(InlineKeyboardButton("✉️ پیام به مدیر", callback_data="msg_to_admin"))
     markup.add(InlineKeyboardButton("📜 تاریخچه تغییرات", callback_data="history"))
+    markup.add(InlineKeyboardButton("🤖 ربات‌ساز", callback_data="create_bot"))
     return markup
 
 def get_admin_panel():
     markup = InlineKeyboardMarkup()
     markup.add(
-        InlineKeyboardButton("مشاهده شماره‌ها", callback_data="view_contacts"),
-        InlineKeyboardButton("تعداد کاربران", callback_data="count_users"),
-        InlineKeyboardButton("مشاهده امتیازها", callback_data="view_bonus")
+        InlineKeyboardButton("📇 مشاهده شماره‌ها", callback_data="view_contacts"),
+        InlineKeyboardButton("👥 تعداد کاربران", callback_data="count_users"),
+        InlineKeyboardButton("💰 مشاهده امتیازها", callback_data="view_bonus")
     )
     markup.add(
-        InlineKeyboardButton("ارسال پیام به کاربران", callback_data="send_msg_multi"),
-        InlineKeyboardButton("تغییر امتیاز کاربران", callback_data="change_bonus_multi")
+        InlineKeyboardButton("📤 ارسال پیام به کاربران", callback_data="send_msg_multi"),
+        InlineKeyboardButton("⚡ تغییر امتیاز کاربران", callback_data="change_bonus_multi")
     )
     return markup
 
@@ -72,16 +74,17 @@ def contact_handler(message):
 
     if user_id not in accounts:
         accounts[user_id] = {"name": name, "phone": phone,
-                             "diamond":0,"gold":0,"coin":0,"last_bonus":None,"history":[]}
+                             "coin":0,"last_bonus":None,"history":[],"bots":[]}
         accounts[user_id]["history"].append(f"{datetime.now()} - ثبت شماره: {phone}")
     else:
         accounts[user_id]["phone"] = phone
         accounts[user_id]["history"].append(f"{datetime.now()} - تغییر شماره: {phone}")
     save_data()
 
-    bot.send_message(message.chat.id, f"شماره شما ثبت شد: {phone}", reply_markup=get_user_panel())
     if user_id == ADMIN_ID:
         bot.send_message(message.chat.id, "پنل مدیریت فعال شد:", reply_markup=get_admin_panel())
+    else:
+        bot.send_message(message.chat.id, f"شماره شما ثبت شد: {phone}", reply_markup=get_user_panel())
 
 # ------------------- کال‌بک‌ها -------------------
 @bot.callback_query_handler(func=lambda call: True)
@@ -89,11 +92,34 @@ def callback_handler(call):
     user_id = call.from_user.id
     acc = accounts.get(user_id)
 
-    if call.data == "view_score" and acc:
+    # مدیر
+    if user_id == ADMIN_ID:
+        if call.data == "view_contacts":
+            text = "\n".join([f"{info['name']}: {info['phone']}" for info in accounts.values()]) or "هنوز شماره‌ای ثبت نشده."
+            bot.send_message(call.message.chat.id, text, reply_markup=get_admin_panel())
+        elif call.data == "count_users":
+            bot.send_message(call.message.chat.id, f"تعداد کل کاربران: {len(accounts)}", reply_markup=get_admin_panel())
+        elif call.data == "view_bonus":
+            text = "\n".join([f"{info['name']}: {info['coin']} سکه‌ای" for info in accounts.values()])
+            bot.send_message(call.message.chat.id, text, reply_markup=get_admin_panel())
+        elif call.data == "send_msg_multi":
+            bot.send_message(call.message.chat.id, "آیدی کاربران را با فاصله وارد کنید و سپس پیام را بنویسید:\nمثال: 123 456 سلام!")
+            pending_action[user_id] = "send_msg_multi"
+        elif call.data == "change_bonus_multi":
+            bot.send_message(call.message.chat.id, "آیدی کاربران و مقدار امتیاز را وارد کنید:\nمثال: 123 456 10")
+            pending_action[user_id] = "change_bonus_multi"
+        return
+
+    # کاربران
+    if not acc:
+        bot.send_message(call.message.chat.id, "ابتدا شماره خود را ارسال کنید.", reply_markup=get_main_keyboard(user_id))
+        return
+
+    if call.data == "view_score":
         bot.send_message(call.message.chat.id,
-                         f"📊 امتیاز شما:\nالماسی: {acc['diamond']}\nطلایی: {acc['gold']}\nسکه‌ای: {acc['coin']}\nآخرین دریافت امتیاز: {acc['last_bonus']}",
+                         f"💰 امتیاز سکه‌ای شما: {acc['coin']}\nآخرین دریافت امتیاز: {acc['last_bonus']}",
                          reply_markup=get_user_panel())
-    elif call.data == "daily_bonus" and acc:
+    elif call.data == "daily_bonus":
         now = datetime.now()
         last = datetime.fromisoformat(acc["last_bonus"]) if acc["last_bonus"] else None
         if not last or now - last >= timedelta(days=1):
@@ -104,21 +130,15 @@ def callback_handler(call):
             bot.answer_callback_query(call.id, "۵ امتیاز روزانه اضافه شد!")
         else:
             bot.answer_callback_query(call.id, "امتیاز روزانه قبلاً دریافت شده.")
-    elif call.data == "change_phone":
-        bot.send_message(call.message.chat.id, "لطفاً شماره جدید خود را ارسال کنید.")
-        pending_action[user_id] = "change_phone"
     elif call.data == "msg_to_admin":
         bot.send_message(call.message.chat.id, "پیام خود را برای مدیر ارسال کنید:")
         pending_action[user_id] = "msg_to_admin"
-    elif call.data == "history" and acc:
+    elif call.data == "history":
         text = "\n".join(acc["history"][-10:]) if acc["history"] else "تاریخچه‌ای وجود ندارد."
         bot.send_message(call.message.chat.id, f"📜 آخرین تغییرات:\n{text}", reply_markup=get_user_panel())
-    elif user_id == ADMIN_ID:
-        if call.data == "view_contacts":
-            text = "\n".join([f"{info['name']}: {info['phone']}" for info in accounts.values()]) or "هنوز شماره‌ای ثبت نشده."
-            bot.send_message(call.message.chat.id, text, reply_markup=get_admin_panel())
-        elif call.data == "count_users":
-            bot.send_message(call.message.chat.id, f"تعداد کل کاربران: {len(accounts)}", reply_markup=get_admin_panel())
+    elif call.data == "create_bot":
+        bot.send_message(call.message.chat.id, "نام ربات خود را وارد کنید:")
+        pending_action[user_id] = "create_bot_name"
 
 # ------------------- مدیریت پیام‌ها -------------------
 @bot.message_handler(func=lambda message: True)
@@ -126,20 +146,56 @@ def handle_messages(message):
     user_id = message.from_user.id
     acc = accounts.get(user_id)
 
-    if pending_action.get(user_id) == "change_phone" and acc:
-        new_phone = message.text
-        acc["phone"] = new_phone
-        acc["history"].append(f"{datetime.now()} - تغییر شماره: {new_phone}")
-        save_data()
-        bot.send_message(message.chat.id, f"شماره شما به {new_phone} تغییر یافت.", reply_markup=get_user_panel())
-        pending_action.pop(user_id, None)
-    elif pending_action.get(user_id) == "msg_to_admin" and acc:
+    # مدیر
+    if user_id == ADMIN_ID and user_id in pending_action:
+        action = pending_action.pop(user_id)
+        try:
+            parts = message.text.split()
+            if action == "send_msg_multi":
+                *user_ids, msg = parts[:-1], parts[-1]
+                text = " ".join(parts[len(user_ids):])
+                for uid_str in user_ids:
+                    uid = int(uid_str)
+                    if uid in accounts:
+                        bot.send_message(uid, f"پیام مدیر: {text}")
+                bot.send_message(message.chat.id, "پیام برای همه کاربران ارسال شد.", reply_markup=get_admin_panel())
+            elif action == "change_bonus_multi":
+                *user_ids, bonus_str = parts[:-1], parts[-1]
+                bonus = int(bonus_str)
+                for uid_str in user_ids:
+                    uid = int(uid_str)
+                    if uid in accounts:
+                        accounts[uid]["coin"] = bonus
+                save_data()
+                bot.send_message(message.chat.id, "امتیاز کاربران تغییر کرد.", reply_markup=get_admin_panel())
+        except:
+            bot.send_message(message.chat.id, "فرمت اشتباه است. دوباره تلاش کنید.", reply_markup=get_admin_panel())
+        return
+
+    # کاربر
+    if not acc:
+        bot.send_message(message.chat.id, "ابتدا شماره خود را ارسال کنید.", reply_markup=get_main_keyboard(user_id))
+        return
+
+    # پیام به مدیر
+    if pending_action.get(user_id) == "msg_to_admin":
         msg_text = message.text
         bot.send_message(ADMIN_ID, f"پیام از {acc['name']} ({acc['phone']}):\n{msg_text}")
         bot.send_message(message.chat.id, "پیام شما به مدیر ارسال شد.", reply_markup=get_user_panel())
         pending_action.pop(user_id, None)
-    else:
-        bot.send_message(message.chat.id, "لطفاً گزینه مورد نظر را انتخاب کنید:", reply_markup=get_main_keyboard(user_id))
+        return
+
+    # ربات‌ساز
+    if pending_action.get(user_id) == "create_bot_name":
+        bot_name = message.text
+        acc["bots"].append({"name": bot_name, "created_at": str(datetime.now())})
+        acc["history"].append(f"{datetime.now()} - ساخت ربات: {bot_name}")
+        save_data()
+        bot.send_message(message.chat.id, f"ربات {bot_name} ساخته شد!", reply_markup=get_user_panel())
+        pending_action.pop(user_id, None)
+        return
+
+    bot.send_message(message.chat.id, "لطفاً گزینه مورد نظر را انتخاب کنید:", reply_markup=get_main_keyboard(user_id))
 
 # ------------------- مسیر وب‌هوک -------------------
 @app.route(f"/{TOKEN}", methods=["POST"])
