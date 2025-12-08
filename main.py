@@ -13,9 +13,11 @@ bot = telebot.TeleBot(TOKEN, threaded=False)
 app = Flask(__name__)
 
 # ------------------- داده‌ها -------------------
-accounts = {}  # user_id: {"name":..., "phone":..., "coin":0,"last_bonus":None,"history":[],"bots":[]}
+accounts = {}  # user_id: {"name":..., "phone":..., "coin":0, "crypto":{BTC:0, ETH:0,...}, "last_bonus":None, "history":[]}
 pending_action = {}
 DATA_FILE = "accounts.json"
+
+CRYPTO_LIST = ["Bitcoin", "Ethereum", "Tether", "Dogecoin"]
 
 def save_data():
     with open(DATA_FILE, "w", encoding="utf-8") as f:
@@ -37,7 +39,7 @@ def get_main_keyboard(user_id):
     if user_id == ADMIN_ID:
         markup.add("🛠 پنل مدیریت")
     elif user_id in accounts and "phone" in accounts[user_id]:
-        markup.add("👤 پنل من")
+        markup.add("👤 پنل من", "💱 خرید ارز")
     else:
         markup.add("👤 اکانت")
         markup.add(KeyboardButton("📲 ارسال شماره", request_contact=True))
@@ -49,7 +51,13 @@ def get_user_panel():
     markup.add(InlineKeyboardButton("🎁 دریافت امتیاز روزانه", callback_data="daily_bonus"))
     markup.add(InlineKeyboardButton("✉️ پیام به مدیر", callback_data="msg_to_admin"))
     markup.add(InlineKeyboardButton("📜 تاریخچه تغییرات", callback_data="history"))
-    markup.add(InlineKeyboardButton("🤖 ربات‌ساز", callback_data="create_bot"))
+    markup.add(InlineKeyboardButton("💱 مشاهده موجودی ارز", callback_data="view_crypto"))
+    return markup
+
+def get_crypto_keyboard():
+    markup = InlineKeyboardMarkup()
+    for crypto in CRYPTO_LIST:
+        markup.add(InlineKeyboardButton(f"💸 خرید {crypto}", callback_data=f"buy_{crypto}"))
     return markup
 
 def get_admin_panel():
@@ -61,7 +69,12 @@ def get_admin_panel():
     )
     markup.add(
         InlineKeyboardButton("📤 ارسال پیام به کاربران", callback_data="send_msg_multi"),
-        InlineKeyboardButton("⚡ تغییر امتیاز کاربران", callback_data="change_bonus_multi")
+        InlineKeyboardButton("⚡ تغییر امتیاز کاربران", callback_data="change_bonus_multi"),
+        InlineKeyboardButton("💱 مدیریت ارز کاربران", callback_data="manage_crypto")
+    )
+    markup.add(
+        InlineKeyboardButton("🔎 جستجوی کاربر", callback_data="search_user"),
+        InlineKeyboardButton("🟢 کاربران آنلاین", callback_data="online_users")
     )
     return markup
 
@@ -73,9 +86,14 @@ def contact_handler(message):
     name = message.from_user.first_name
 
     if user_id not in accounts:
-        accounts[user_id] = {"name": name, "phone": phone,
-                             "coin":0,"last_bonus":None,"history":[],"bots":[]}
-        accounts[user_id]["history"].append(f"{datetime.now()} - ثبت شماره: {phone}")
+        accounts[user_id] = {
+            "name": name,
+            "phone": phone,
+            "coin":0,
+            "crypto": {c:0 for c in CRYPTO_LIST},
+            "last_bonus":None,
+            "history":[f"{datetime.now()} - ثبت شماره: {phone}"]
+        }
     else:
         accounts[user_id]["phone"] = phone
         accounts[user_id]["history"].append(f"{datetime.now()} - تغییر شماره: {phone}")
@@ -108,6 +126,16 @@ def callback_handler(call):
         elif call.data == "change_bonus_multi":
             bot.send_message(call.message.chat.id, "آیدی کاربران و مقدار امتیاز را وارد کنید:\nمثال: 123 456 10")
             pending_action[user_id] = "change_bonus_multi"
+        elif call.data == "manage_crypto":
+            bot.send_message(call.message.chat.id, "آیدی کاربران و مقدار ارز را وارد کنید:\nمثال: 123 BTC 2")
+            pending_action[user_id] = "manage_crypto"
+        elif call.data == "search_user":
+            bot.send_message(call.message.chat.id, "شماره کاربر را وارد کنید:")
+            pending_action[user_id] = "search_user"
+        elif call.data == "online_users":
+            now = datetime.now()
+            online_count = sum(1 for u in accounts.values() if u.get("last_bonus") and now - datetime.fromisoformat(u["last_bonus"]) < timedelta(days=1))
+            bot.send_message(call.message.chat.id, f"تعداد کاربران فعال ۲۴ ساعت گذشته: {online_count}", reply_markup=get_admin_panel())
         return
 
     # کاربران
@@ -136,9 +164,15 @@ def callback_handler(call):
     elif call.data == "history":
         text = "\n".join(acc["history"][-10:]) if acc["history"] else "تاریخچه‌ای وجود ندارد."
         bot.send_message(call.message.chat.id, f"📜 آخرین تغییرات:\n{text}", reply_markup=get_user_panel())
-    elif call.data == "create_bot":
-        bot.send_message(call.message.chat.id, "نام ربات خود را وارد کنید:")
-        pending_action[user_id] = "create_bot_name"
+    elif call.data == "view_crypto":
+        text = "\n".join([f"{c}: {acc['crypto'][c]}" for c in CRYPTO_LIST])
+        bot.send_message(call.message.chat.id, f"💱 موجودی ارزهای شما:\n{text}", reply_markup=get_user_panel())
+    elif call.data.startswith("buy_"):
+        crypto = call.data.split("_")[1]
+        acc["crypto"][crypto] += 1
+        acc["history"].append(f"{datetime.now()} - خرید ۱ واحد {crypto}")
+        save_data()
+        bot.send_message(call.message.chat.id, f"✅ یک واحد {crypto} خریداری شد.", reply_markup=get_user_panel())
 
 # ------------------- مدیریت پیام‌ها -------------------
 @bot.message_handler(func=lambda message: True)
@@ -168,6 +202,22 @@ def handle_messages(message):
                         accounts[uid]["coin"] = bonus
                 save_data()
                 bot.send_message(message.chat.id, "امتیاز کاربران تغییر کرد.", reply_markup=get_admin_panel())
+            elif action == "manage_crypto":
+                user_id_target, crypto, amount = parts
+                user_id_target = int(user_id_target)
+                amount = int(amount)
+                if user_id_target in accounts and crypto in CRYPTO_LIST:
+                    accounts[user_id_target]["crypto"][crypto] = amount
+                    save_data()
+                    bot.send_message(message.chat.id, f"{crypto} کاربر {user_id_target} تغییر کرد.", reply_markup=get_admin_panel())
+            elif action == "search_user":
+                phone = parts[0]
+                for uid, info in accounts.items():
+                    if info.get("phone") == phone:
+                        bot.send_message(message.chat.id, f"نام: {info['name']}\nامتیاز: {info['coin']}\nارزها: {info['crypto']}", reply_markup=get_admin_panel())
+                        break
+                else:
+                    bot.send_message(message.chat.id, "کاربری یافت نشد.", reply_markup=get_admin_panel())
         except:
             bot.send_message(message.chat.id, "فرمت اشتباه است. دوباره تلاش کنید.", reply_markup=get_admin_panel())
         return
@@ -180,18 +230,8 @@ def handle_messages(message):
     # پیام به مدیر
     if pending_action.get(user_id) == "msg_to_admin":
         msg_text = message.text
-        bot.send_message(ADMIN_ID, f"پیام از {acc['name']} ({acc['phone']}):\n{msg_text}")
+        bot.send_message(ADMIN_ID, f"📩 پیام از {acc['name']} ({acc['phone']})\nزمان: {datetime.now()}\nمتن پیام: {msg_text}")
         bot.send_message(message.chat.id, "پیام شما به مدیر ارسال شد.", reply_markup=get_user_panel())
-        pending_action.pop(user_id, None)
-        return
-
-    # ربات‌ساز
-    if pending_action.get(user_id) == "create_bot_name":
-        bot_name = message.text
-        acc["bots"].append({"name": bot_name, "created_at": str(datetime.now())})
-        acc["history"].append(f"{datetime.now()} - ساخت ربات: {bot_name}")
-        save_data()
-        bot.send_message(message.chat.id, f"ربات {bot_name} ساخته شد!", reply_markup=get_user_panel())
         pending_action.pop(user_id, None)
         return
 
