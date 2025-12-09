@@ -1,4 +1,2 @@
-pyTelegramBotAPI==4.14.0
-requests
-beautifulsoup4
-googlesearch-python
+Flask>=3.1.0
+python-telegram-bot>=22.5
