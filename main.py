@@ -7,7 +7,7 @@ from datetime import datetime, date
 
 TOKEN = "8207757951:AAHpvqWfbtlZtyigTGN_MYOxZ408u3Q5rgs"
 ADMIN_ID = 6994772164
-WEBHOOK_URL = "https://chatgpt-telegram-bkp1.onrender.com/"
+WEBHOOK_URL = "https://code-ai-0alo.onrender.com/"
 USERS_FILE = "users.pkl"  # فایل برای ذخیره کاربران
 
 bot = telebot.TeleBot(TOKEN)
